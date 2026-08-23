@@ -57,6 +57,10 @@ if grep -E '^(wasm-bindgen|js-sys|web-sys|wasm-bindgen-futures) v' "$tree"; then
   echo "error: browser/JavaScript package reached the Wasm target graph" >&2
   exit 1
 fi
+if grep -E '^(libloading|libffi|libffi-sys|reqwest|socket2|mio) v' "$tree"; then
+  echo "error: dynamic loading or host networking package reached the Wasm target graph" >&2
+  exit 1
+fi
 if grep -E '^(wasi|wasip[0-9]*|wasi-common|wasi-cap-std-sync) v' "$tree"; then
   echo "error: WASI package reached the wasm32-unknown-unknown target graph" >&2
   exit 1
