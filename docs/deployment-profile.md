@@ -42,10 +42,10 @@ on an Apple-silicon Mac (2026-08-23):
 | core tables | 1, fixed 6,015 funcrefs |
 | 50,000,000 fuel | `OutOfFuel` during startup |
 | 100,000,000 fuel | normal `result = 2` success |
-| three warm calls at 100M | 11.38–14.72 ms, 12.75 ms mean |
-| cold CLI process | 1.85 s real |
-| cold maximum resident set size (`time -l`) | 598,540,288 bytes |
-| cold Darwin peak-memory-footprint counter | 447,791,968 bytes |
+| repeated warm calls at 100M | 11.02–14.72 ms; 12.26–12.75 ms run means |
+| cold CLI process (two runs) | 1.85–2.08 s real |
+| cold maximum resident set size (`time -l`) | 582,631,424–598,540,288 bytes |
+| cold Darwin peak-memory-footprint counter | 447,791,968–453,116,792 bytes |
 
 `./scripts/measure-final-artifact.sh python-provider.wasm` writes the machine-readable record to
 `/tmp/dekopon-python-measurements.json`, captures raw core declarations, repeats the fuel bracket,
@@ -60,7 +60,7 @@ absent and reserves one `maxMemoryBytes` unit per live store; it does not accoun
 compiled code, Cranelift/component compilation, or host allocations. Compilation is also outside
 fuel and invocation deadlines.
 
-The measured single cold compiler process already reached roughly 599 MB RSS. Until
+The measured single cold compiler process reached up to roughly 599 MB RSS. Until
 platform-specific RSS and concurrency load tests establish a tighter number, budget at least
 **768 MiB plus admitted concurrent guest reservations** for one compiler/connection profile; do
 not derive a container limit from the 64 MiB store ceiling alone.
