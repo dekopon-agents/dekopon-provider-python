@@ -57,6 +57,10 @@ if grep -E '^(wasm-bindgen|js-sys|web-sys|wasm-bindgen-futures) v' "$tree"; then
   echo "error: browser/JavaScript package reached the Wasm target graph" >&2
   exit 1
 fi
+if grep -E '^(wasi|wasip[0-9]*|wasi-common|wasi-cap-std-sync) v' "$tree"; then
+  echo "error: WASI package reached the wasm32-unknown-unknown target graph" >&2
+  exit 1
+fi
 cargo tree --locked --manifest-path "$root/Cargo.toml" \
   --target wasm32-unknown-unknown -e features -f '{p} {f}' >"$features"
 if grep 'rustpython-vm v0.5.0' "$features" | grep -E 'host_env|stdio|threading|wasmbind' >/dev/null; then
