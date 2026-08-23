@@ -16,6 +16,9 @@ env:
   PROVIDER_RUST_TOOLCHAIN: "1.97.0"
   WASM_TOOLS_VERSION: "1.236.1"
   CARGO_DENY_VERSION: "0.20.2"
+  CARGO_CYCLONEDX_VERSION: "0.5.9"
+  ACTIONLINT_VERSION: "1.7.12"
+  ACTIONLINT_LINUX_AMD64_SHA256: "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
   DEKOPON_RUN_VERSION: "0.11.1"
   WASMTIME_VERSION: "48.0.0"
 
@@ -41,7 +44,7 @@ jobs:
           rustup toolchain install "$PROVIDER_RUST_TOOLCHAIN" --profile minimal \
             --component clippy --component rustfmt
           rustup target add wasm32-unknown-unknown --toolchain "$PROVIDER_RUST_TOOLCHAIN"
-      - name: Install pinned policy and component tools
+      - name: Install pinned policy, component, and workflow tools
         shell: bash
         run: |
           set -euo pipefail
@@ -49,6 +52,14 @@ jobs:
             --version "$CARGO_DENY_VERSION" --locked
           cargo +"$PROVIDER_RUST_TOOLCHAIN" install wasm-tools \
             --version "$WASM_TOOLS_VERSION" --locked
+          archive="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl --fail --silent --show-error --location \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${archive}" \
+            --output "$RUNNER_TEMP/$archive"
+          echo "$ACTIONLINT_LINUX_AMD64_SHA256  $RUNNER_TEMP/$archive" | \
+            sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" actionlint
+          install -m 0755 "$RUNNER_TEMP/actionlint" "$RUNNER_TEMP/actionlint-bin"
       - name: Format, lint, test, MSRV, target, lock, licenses, and notices
         shell: bash
         run: |
@@ -61,7 +72,40 @@ jobs:
           ./scripts/assert-lock-and-feature-graph.sh Cargo.lock
           cargo deny check licenses advisories bans sources
           ./scripts/check-third-party-notices.sh Cargo.lock THIRD_PARTY_NOTICES.md
+          bash -n scripts/*.sh
+          ruby -e 'require "yaml"; ARGV.each { |f| YAML.safe_load(File.read(f), aliases: true) }' \
+            .github/workflows/*.yml
+          "$RUNNER_TEMP/actionlint-bin" -color
           ./scripts/validate-workflows-and-release-layout.sh
+
+  source_bundle:
+    name: deterministic corresponding source and offline relink
+    needs: source
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source without credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Install pinned Rust, componentizer, and SBOM tool
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup toolchain install "$PROVIDER_RUST_TOOLCHAIN" --profile minimal
+          rustup target add wasm32-unknown-unknown --toolchain "$PROVIDER_RUST_TOOLCHAIN"
+          cargo +"$PROVIDER_RUST_TOOLCHAIN" install wasm-tools \
+            --version "$WASM_TOOLS_VERSION" --locked
+          cargo +"$PROVIDER_RUST_TOOLCHAIN" install cargo-cyclonedx \
+            --version "$CARGO_CYCLONEDX_VERSION" --locked
+      - name: Reproduce source bundle and relink modified Malachite offline
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/build-source-bundle.sh dist
+          ./scripts/test-source-bundle-reproducibility.sh dist
+          ./scripts/test-source-bundle-relink.sh \
+            dist/dekopon-python-provider-0.1.0-relink-source.tar.gz \
+            dist/dekopon-python-provider-0.1.0.cdx.json
 
   component:
     name: component and real hosts

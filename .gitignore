@@ -1,6 +1,15 @@
 /target/
+/dist/
+/vendor/
+/.source-staging/
 /python-provider.wasm
 /python-provider.wasm.sha256
+/SHA256SUMS
 *.wasm
 *.wasm.sha256
+*.tar.gz
+*.tar.gz.sha256
+*.cdx.json
+__pycache__/
+*.pyc
 .DS_Store

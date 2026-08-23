@@ -23,17 +23,30 @@ for name in required_rustpython:
         raise SystemExit(f"error: {name} must resolve exactly once at 0.5.0, got {versions.get(name)}")
 required = {
     "dekopon-provider-sdk": {"0.11.0"},
+    "malachite-base": {"0.9.2"},
     "malachite-bigint": {"0.9.2"},
+    "malachite-nz": {"0.9.2"},
+    "malachite-q": {"0.9.2"},
+    "r-efi": {"5.3.0", "6.0.0"},
     "yaml-rust2": {"0.12.0"},
 }
 for name, expected in required.items():
     if versions.get(name) != expected:
         raise SystemExit(f"error: {name} must be {expected}, got {versions.get(name)}")
+checksums = {
+    ("dekopon-provider-sdk", "0.11.0"): "40d29d6bfd3f634c6229cf6121b0ae78fb512e1355862ba112d7c5dcf3241e39",
+    ("malachite-base", "0.9.2"): "a4f44099731f17094b07825c88ccb5fbd1bfa1f82fafff7daa33e8b8652db16e",
+    ("malachite-bigint", "0.9.2"): "cc58206ba15e9c406e20c95c5f86efa07b12f94080945908e910b3a0faa23fef",
+    ("malachite-nz", "0.9.2"): "a137660cdba20f136c8a223125f08088adb4e0b72fbb8466f08c43e31cc0427d",
+    ("malachite-q", "0.9.2"): "5ffcbeed95e34c0fcc3864ccd146e129cbbf7de1513d3afbcfb47c7674c82d94",
+    ("r-efi", "5.3.0"): "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f",
+    ("r-efi", "6.0.0"): "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf",
+    ("yaml-rust2", "0.12.0"): "c6edb26322e610d4f04b7cd34478317685d24d0999437e551fb97c5441151041",
+}
 for package in packages:
-    if package["name"] == "dekopon-provider-sdk" and package.get("checksum") != "40d29d6bfd3f634c6229cf6121b0ae78fb512e1355862ba112d7c5dcf3241e39":
-        raise SystemExit("error: dekopon-provider-sdk checksum drift")
-    if package["name"] == "yaml-rust2" and package.get("checksum") != "c6edb26322e610d4f04b7cd34478317685d24d0999437e551fb97c5441151041":
-        raise SystemExit("error: yaml-rust2 checksum drift")
+    key = (package["name"], package["version"])
+    if key in checksums and package.get("checksum") != checksums[key]:
+        raise SystemExit(f"error: {key[0]} {key[1]} checksum drift")
 PY
 
 metadata=$(mktemp)

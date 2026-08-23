@@ -2,9 +2,10 @@
 
 ## Supported version
 
-Security fixes are accepted for the unreleased 0.1.x line. **v0.1.0 publication is currently on
-hold** because the statically linked LGPL-3.0-only Malachite packages do not yet have an approved
-source/relinkability distribution design.
+Security fixes are accepted for the 0.1.x line. The owner has accepted the exact LGPL-3.0-only
+Malachite packages and the corresponding-source/relinkability design for this standalone optional
+provider's v0.1.0 release. That is a project policy decision, not a claim of attorney review. The
+repository variable and immutable release gates remain mechanical publication controls.
 
 Report suspected vulnerabilities privately through GitHub's security-advisory interface for
 `dekopon-agents/dekopon-provider-python`. Do not include secrets, production scripts, or private
@@ -69,6 +70,13 @@ RustPython 0.5.0's build script copies its complete build environment into froze
 an explicit non-secret environment and rejects sensitive key markers in the artifact. Running a
 plain release Cargo build is useful as a compile gate but is **not** an approved distributable
 build; only `scripts/build-component.sh` produces the scrubbed component.
+
+Every official component is bound by checksums and OCI annotations to a versioned corresponding-
+source archive. That archive includes the exact provider source and complete vendored lockfile
+closure, uses offline Cargo source replacement, and documents how to modify Malachite and relink a
+new component. CI performs that modification and clean offline rebuild. The source archive/SBOM
+and component are generated release products and are never trusted merely because they exist in a
+working tree; release gates verify their bytes, manifests, and anonymous retrieval paths.
 
 ## Host-enforced termination
 

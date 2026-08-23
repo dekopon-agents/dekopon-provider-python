@@ -5,7 +5,7 @@ all-features = true
 version = 2
 yanked = "deny"
 ignore = [
-  { id = "RUSTSEC-2024-0436", reason = "paste 1.0.15 is fixed in the exact RustPython 0.5.0 graph; no maintained compatible release exists, publication remains held" },
+  { id = "RUSTSEC-2024-0436", reason = "paste 1.0.15 is fixed in the accepted exact RustPython 0.5.0 graph; no maintained compatible release exists" },
   { id = "RUSTSEC-2025-0075", reason = "exact RustPython 0.5.0 rust-unic closure; unmaintained, no safe compatible upgrade" },
   { id = "RUSTSEC-2025-0078", reason = "exact RustPython 0.5.0 rust-unic closure; unmaintained, no safe compatible upgrade" },
   { id = "RUSTSEC-2025-0079", reason = "exact RustPython 0.5.0 rust-unic closure; unmaintained, no safe compatible upgrade" },
@@ -42,6 +42,9 @@ allow = [
   "Zlib",
   "bzip2-1.0.6",
 ]
+# Owner-accepted, provider-local v0.1.0 exceptions. These exact package/version entries are paired
+# with complete corresponding source and relink instructions; they are intentionally not a blanket
+# LGPL allow and do not alter the separate Dekopon core repository policy.
 exceptions = [
   { allow = ["LGPL-3.0-only"], crate = "malachite-base@0.9.2" },
   { allow = ["LGPL-3.0-only"], crate = "malachite-bigint@0.9.2" },

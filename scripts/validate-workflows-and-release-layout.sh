@@ -2,8 +2,12 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
-test -z "$(git -C "$root" ls-files '*.wasm')" || {
-  echo "error: tracked Wasm found" >&2
+# shellcheck source=lib-release-assets.sh
+# Resolved from this script's absolute repository root.
+# shellcheck disable=SC1091
+source "$root/scripts/lib-release-assets.sh"
+test -z "$(git -C "$root" ls-files '*.wasm' '*.wasm.sha256' '*.tar.gz' '*.cdx.json' 'vendor/**')" || {
+  echo 'error: generated binary/compliance output is tracked' >&2
   exit 1
 }
 for workflow in "$root/.github/workflows/ci.yml" "$root/.github/workflows/release.yml"; do
@@ -19,24 +23,67 @@ for workflow in "$root/.github/workflows/ci.yml" "$root/.github/workflows/releas
     }
   done < <(sed -nE 's/^[[:space:]]*uses: [^@]+@([0-9a-f]+).*/\1/p' "$workflow")
 done
+
 release="$root/.github/workflows/release.yml"
 for required in \
   'v0.1.0' \
-  'python-provider.wasm' \
-  'python-provider.wasm.sha256' \
-  'ghcr.io/dekopon-agents/provider-python' \
-  'application/vnd.dekopon.provider.v1+wasm' \
-  'application/wasm' \
   'PROVIDER_PYTHON_RELEASE_APPROVED' \
+  'ghcr.io/dekopon-agents/provider-python' \
+  'ghcr.io/dekopon-agents/provider-python-source' \
   'OCI_STAGING_REPOSITORY' \
-  'run-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT' \
+  'SOURCE_OCI_STAGING_REPOSITORY' \
+  'application/vnd.dekopon.provider.v1+wasm' \
+  'application/vnd.dekopon.provider.source.v1' \
+  'python-provider.wasm:application/wasm' \
+  'org.dekopon.corresponding-source.oci' \
+  'org.dekopon.corresponding-source.digest' \
+  'org.dekopon.corresponding-source.archive' \
+  'test-source-bundle-reproducibility.sh' \
+  'test-source-bundle-relink.sh' \
+  'verify-release-assets.sh' \
+  'verify-oci-manifest.py' \
+  'docker logout ghcr.io' \
+  'env -u GH_TOKEN -u GITHUB_TOKEN' \
   'manifest delete --force' \
-  'initial_visibility' \
+  'provider_initial_visibility' \
+  'source_initial_visibility' \
   'remove only this run' \
   'always() && failure()'; do
-  grep -Fq "$required" "$release" || { echo "error: release workflow lacks $required" >&2; exit 1; }
+  grep -Fq "$required" "$release" || {
+    echo "error: release workflow lacks $required" >&2
+    exit 1
+  }
 done
-if grep -E 'provider-python:(latest|stable)|--tag[ =]+latest' "$release"; then
-  echo "error: release workflow must never publish latest" >&2
+
+asset_count=$(release_asset_names 0.1.0 | wc -l | tr -d ' ')
+source_count=$(source_oci_asset_names 0.1.0 | wc -l | tr -d ' ')
+[[ "$asset_count" == 14 && "$source_count" == 13 ]] || {
+  echo 'error: immutable release/source asset counts drifted' >&2
+  exit 1
+}
+while IFS= read -r asset; do
+  grep -Fq "$asset" "$release" || {
+    echo "error: release workflow omits immutable asset $asset" >&2
+    exit 1
+  }
+done < <(release_asset_names 0.1.0)
+[[ "$(grep -Fc 'python-provider.wasm:application/wasm' "$release")" -eq 1 ]] || {
+  echo 'error: provider OCI must declare exactly one application/wasm layer' >&2
+  exit 1
+}
+# Intentional literal workflow assertion.
+# shellcheck disable=SC2016
+grep -Fq 'test "$(find dist -maxdepth 1 -type f | wc -l)" -eq 14' "$release" || {
+  echo 'error: release workflow does not enforce the expanded 14-asset layout' >&2
+  exit 1
+}
+if grep -E 'provider-python(-source)?:(latest|stable)|--tag[ =]+(latest|stable)' "$release"; then
+  echo 'error: release workflow must never publish a mutable latest/stable tag' >&2
   exit 1
 fi
+for document in README.md RELEASE_COMPLIANCE.md THIRD_PARTY_NOTICES.md RELINKING.md SECURITY.md; do
+  grep -Eiq 'corresponding[- ]source' "$root/$document" || {
+    echo "error: $document lacks a corresponding-source notice" >&2
+    exit 1
+  }
+done

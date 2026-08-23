@@ -4,15 +4,17 @@ An import-free WebAssembly component exposing one read-only, High-risk capabilit
 `python.eval`. Version 0.1.0 embeds **RustPython 0.5.0 exactly**, creates a fresh interpreter per
 call, captures bounded stdout in Rust, and returns only a bounded JSON-shaped result.
 
-> **Release status: prototype / publication HOLD.** The implementation is executable and host
-> tested. Do not create `v0.1.0` or enable publication until the LGPL-3.0-only Malachite static-Wasm
-> distribution question in `THIRD_PARTY_NOTICES.md` has an owner/legal decision. The release
-> workflow additionally requires the repository variable `PROVIDER_PYTHON_RELEASE_APPROVED=true`.
+> **Release status: v0.1.0 owner-approved; mechanical publication interlock remains.** The owner
+> accepted the exact LGPL dependencies and corresponding-source/relink design for this standalone
+> optional provider. This records a project policy choice, not attorney review. Publication still
+> requires the per-repository variable `PROVIDER_PYTHON_RELEASE_APPROVED=true`, an annotated tag,
+> and every transactional release check in `RELEASE_COMPLIANCE.md`.
 
 ## Build
 
-Required versions are Rust 1.97.0, target `wasm32-unknown-unknown`, and wasm-tools 1.236.1.
-The component is generated and ignored; it must never be committed.
+Required versions are Rust 1.97.0, target `wasm32-unknown-unknown`, wasm-tools 1.236.1, and
+cargo-cyclonedx 0.5.9 when producing release source/SBOM assets. The component and all compliance
+artifacts are generated and ignored; they must never be committed.
 
 ```console
 ./scripts/build-component.sh
@@ -21,12 +23,30 @@ wasm-tools validate python-provider.wasm
 ./scripts/assert-zero-core-imports.sh python-provider.wasm
 ```
 
-`python-provider.wasm` and its checksum are release products, not source files. CI rejects any
-tracked `*.wasm`. `build-component.sh` builds a clean source snapshot at a fixed canonical path
-under a scrubbed environment because RustPython 0.5.0's build script otherwise freezes every
-visible build variable into `_sysconfigdata` (including accidental credentials). It retains the
-ordinary default target for that standalone snapshot and global sccache; no compiler wrapper,
-`CARGO_TARGET_DIR`, or incremental setting is replaced. The gate scans the resulting component for sensitive environment keys.
+`python-provider.wasm` and its checksum are generated release products, not source files. CI
+rejects any tracked `*.wasm`. `build-component.sh` builds a clean source snapshot at a fixed
+canonical path under a scrubbed environment because RustPython 0.5.0's build script otherwise
+freezes every visible build variable into `_sysconfigdata` (including accidental credentials). It
+retains the ordinary default target for that standalone snapshot and global sccache; no compiler
+wrapper, `CARGO_TARGET_DIR`, or incremental setting is replaced. The gate scans the resulting
+component for sensitive environment keys.
+
+The official Wasm is always distributed with a versioned corresponding-source/relink archive and
+CycloneDX SBOM. The archive carries this exact application source, WIT and lockfile plus the
+complete versioned source of every Cargo dependency and an offline source replacement. Build and
+verify it with pinned `cargo-cyclonedx` 0.5.9:
+
+```console
+./scripts/build-source-bundle.sh dist
+./scripts/test-source-bundle-reproducibility.sh dist
+./scripts/test-source-bundle-relink.sh \
+  dist/dekopon-python-provider-0.1.0-relink-source.tar.gz \
+  dist/dekopon-python-provider-0.1.0.cdx.json
+```
+
+See [RELINKING.md](RELINKING.md) for recipient modification, rebuild, componentization, and
+installation instructions. Generated archives, SBOMs, vendor trees, checksums, staging trees, and
+Wasm remain ignored and absent from Git.
 
 ## Exact CLI use
 
@@ -181,9 +201,21 @@ cargo +1.97.0 test --locked --all-targets
 cargo +1.93.0 check --locked --all-targets
 cargo deny check licenses advisories bans sources
 ./scripts/validate.sh
+./scripts/prepare-release-assets.sh 0.1.0 dist
+./scripts/test-source-bundle-reproducibility.sh dist
+./scripts/test-source-bundle-relink.sh
 ```
 
-## License
+## License and corresponding source
 
-Repository code: MIT OR Apache-2.0. Embedded third-party terms, mandatory notices, unmaintained
-advisories, and the publication hold are documented in `THIRD_PARTY_NOTICES.md` and `deny.toml`.
+Original source authored by this project remains **MIT OR Apache-2.0** (`LICENSE-MIT` and
+`LICENSE-APACHE`). The distributed combined Wasm embeds four Malachite 0.9.2 packages under
+**LGPL-3.0-only**. This does not relicense the original project source, but the embedded code and
+combined distribution carry the applicable third-party terms. Prominent notices and exact package
+checksums are in `THIRD_PARTY_NOTICES.md`; verbatim GNU texts are in `LICENSE-LGPL-3.0` and
+`LICENSE-GPL-3.0` (with `LICENSE-LGPL-2.1` for the locked `r-efi` source packages).
+
+Every binary release provides freely accessible exact corresponding source and relinking material
+both as GitHub Release assets and at
+`ghcr.io/dekopon-agents/provider-python-source:0.1.0`. See `RELINKING.md`. No `latest` tag is
+published.

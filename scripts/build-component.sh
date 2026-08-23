@@ -47,10 +47,20 @@ if [[ ${DEKOPON_PYTHON_CANONICAL_INNER:-0} != 1 ]]; then
   if git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     git -C "$root" archive --format=tar HEAD | tar -xf - -C "$canonical"
   else
+    # Enumerate only top-level source entries instead of using a broad tar exclude pattern. BSD
+    # tar treats --exclude='./target' as matching nested dependency directories such as
+    # vendor/cc-*/src/target, which makes an offline vendored build incomplete.
     (
       cd "$root"
-      tar --exclude='./target' --exclude='./python-provider.wasm' \
-        --exclude='./python-provider.wasm.sha256' -cf - .
+      entries=()
+      while IFS= read -r -d '' entry; do
+        case ${entry#./} in
+          target|python-provider.wasm|python-provider.wasm.sha256) continue ;;
+        esac
+        entries+=("$entry")
+      done < <(find . -mindepth 1 -maxdepth 1 -print0)
+      ((${#entries[@]} > 0))
+      tar -cf - "${entries[@]}"
     ) | tar -xf - -C "$canonical"
   fi
 
