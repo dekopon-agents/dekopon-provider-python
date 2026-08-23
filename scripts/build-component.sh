@@ -49,7 +49,8 @@ CARGO_ENCODED_RUSTFLAGS="$encoded_rustflags" \
     --target wasm32-unknown-unknown \
     --release \
     -- \
-    -C metadata=dekopon-python-provider-0.1.0-repro-v1
+    -C metadata=dekopon-python-provider-0.1.0-repro-v1 \
+    -C extra-filename=
 
 wasm-tools validate "$core"
 "$root/scripts/assert-zero-core-imports.sh" "$core"
