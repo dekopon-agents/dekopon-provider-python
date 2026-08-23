@@ -2,6 +2,13 @@
 set -euo pipefail
 
 json=${1:?usage: assert-provider-wit.sh <component-wit.json>}
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
+grep -Fxq 'package dekopon:provider@0.2.0;' "$root/wit/provider.wit" || {
+  echo "error: mirrored provider package/version drifted" >&2
+  exit 1
+}
+printf '02ba5a92067f53bc8f48e10bf221229c5b7f33f791a031741da5011c32ab37c9  %s\n' \
+  "$root/wit/provider.wit" | sha256sum --check --strict - >/dev/null
 jq -e '
   (.worlds | length) == 1 and
   (.worlds[0].name == "root") and
