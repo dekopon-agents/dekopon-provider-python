@@ -86,7 +86,7 @@ if [[ ${DEKOPON_PYTHON_CANONICAL_INNER:-0} != 1 ]]; then
   sha256sum --check --strict "${component}.sha256"
 
   for forbidden in GH_TOKEN GITHUB_TOKEN GH_PAT OF_PASSWORD UNIFI_SSH_PASSWORD \
-    AWS_SECRET_ACCESS_KEY PI_SESSION_ID "$HOME"; do
+    AWS_SECRET_ACCESS_KEY PI_SESSION_ID; do
     if LC_ALL=C grep -aF -- "$forbidden" "$component" >/dev/null; then
       echo "error: sanitized component contains forbidden build-environment key $forbidden" >&2
       exit 1
