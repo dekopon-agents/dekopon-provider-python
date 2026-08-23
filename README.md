@@ -22,7 +22,11 @@ wasm-tools validate python-provider.wasm
 ```
 
 `python-provider.wasm` and its checksum are release products, not source files. CI rejects any
-tracked `*.wasm`.
+tracked `*.wasm`. `build-component.sh` builds a clean source snapshot at a fixed canonical path
+under a scrubbed environment because RustPython 0.5.0's build script otherwise freezes every
+visible build variable into `_sysconfigdata` (including accidental credentials). It retains the
+ordinary default target for that standalone snapshot and global sccache; no compiler wrapper,
+`CARGO_TARGET_DIR`, or incremental setting is replaced. The gate scans the resulting component for sensitive environment keys.
 
 ## Exact CLI use
 

@@ -61,6 +61,12 @@ The custom `getrandom 0.3.4` backend is deterministic and non-cryptographic. It 
 internals, while the VM uses an explicit fixed hash seed. No Python entropy surface is exposed.
 Host fuel and deadlines, rather than hash randomization, bound adversarial algorithms.
 
+RustPython 0.5.0's build script copies its complete build environment into frozen
+`_sysconfigdata`. The release builder therefore compiles a clean fixed-path source snapshot under
+an explicit non-secret environment and rejects sensitive key markers in the artifact. Running a
+plain release Cargo build is useful as a compile gate but is **not** an approved distributable
+build; only `scripts/build-component.sh` produces the scrubbed component.
+
 ## Host-enforced termination
 
 Provider code does **not** enforce instruction fuel, wall time, or linear memory and cannot turn a

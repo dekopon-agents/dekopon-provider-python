@@ -81,6 +81,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          rm -rf /tmp/dekopon-python-provider-canonical/target
           (cd rebuild && ./scripts/build-component.sh)
           cmp python-provider.wasm rebuild/python-provider.wasm
           cmp python-provider.wasm.sha256 rebuild/python-provider.wasm.sha256

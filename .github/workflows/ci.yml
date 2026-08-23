@@ -156,6 +156,7 @@ jobs:
         run: |
           set -euo pipefail
           (cd source-a && ./scripts/build-component.sh)
+          rm -rf /tmp/dekopon-python-provider-canonical/target
           (cd source-b && ./scripts/build-component.sh)
           cmp source-a/python-provider.wasm source-b/python-provider.wasm
           cmp source-a/python-provider.wasm.sha256 source-b/python-provider.wasm.sha256
