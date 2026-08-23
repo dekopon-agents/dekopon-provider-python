@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -L)
 component=${1:-"$root/python-provider.wasm"}
 required_rust="1.97.0"
 required_rustc="rustc 1.97.0 (2d8144b78 2026-07-07)"
@@ -54,6 +54,14 @@ if [[ ${DEKOPON_PYTHON_CANONICAL_INNER:-0} != 1 ]]; then
     ) | tar -xf - -C "$canonical"
   fi
 
+  real_cargo_home=${CARGO_HOME:-"$HOME/.cargo"}
+  real_rustup_home=${RUSTUP_HOME:-"$HOME/.rustup"}
+  mkdir -p "$canonical/.canonical-bin" "$canonical/.canonical-home"
+  ln -s "$real_cargo_home" "$canonical/.canonical-cargo-home"
+  ln -s "$real_rustup_home" "$canonical/.canonical-rustup-home"
+  ln -s "$(command -v cargo)" "$canonical/.canonical-bin/cargo"
+  ln -s "$(command -v rustup)" "$canonical/.canonical-bin/rustup"
+
   (
     cd "$canonical"
     DEKOPON_PYTHON_CANONICAL_INNER=1 \
@@ -78,7 +86,7 @@ if [[ ${DEKOPON_PYTHON_CANONICAL_INNER:-0} != 1 ]]; then
   sha256sum --check --strict "${component}.sha256"
 
   for forbidden in GH_TOKEN GITHUB_TOKEN GH_PAT OF_PASSWORD UNIFI_SSH_PASSWORD \
-    AWS_SECRET_ACCESS_KEY PI_SESSION_ID; do
+    AWS_SECRET_ACCESS_KEY PI_SESSION_ID "$HOME"; do
     if LC_ALL=C grep -aF -- "$forbidden" "$component" >/dev/null; then
       echo "error: sanitized component contains forbidden build-environment key $forbidden" >&2
       exit 1
@@ -91,10 +99,11 @@ fi
 
 core="$root/target/wasm32-unknown-unknown/release/dekopon_python_provider.wasm"
 
-cargo_home=${CARGO_HOME:-"$HOME/.cargo"}
-cargo_home=$(cd "$cargo_home" && pwd -P)
-sysroot=$(rustup run "$required_rust" rustc --print sysroot)
-sysroot=$(cd "$sysroot" && pwd -P)
+cargo_home="$root/.canonical-cargo-home"
+rustup_home="$root/.canonical-rustup-home"
+home="$root/.canonical-home"
+sysroot=$(RUSTUP_HOME="$rustup_home" "$root/.canonical-bin/rustup" \
+  run "$required_rust" rustc --print sysroot)
 rustflags=(
   '--cfg=getrandom_backend="custom"'
   '--check-cfg=cfg(getrandom_backend, values("custom"))'
@@ -105,21 +114,21 @@ rustflags=(
 encoded_rustflags=$(printf '%s\x1f' "${rustflags[@]}")
 encoded_rustflags=${encoded_rustflags%$'\x1f'}
 
-safe_path="$cargo_home/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+safe_path="$root/.canonical-bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 env -i \
-  HOME="$HOME" \
-  USER="$(id -un)" \
-  LOGNAME="$(id -un)" \
+  HOME="$home" \
+  USER=dekopon-builder \
+  LOGNAME=dekopon-builder \
   PATH="$safe_path" \
   CARGO_HOME="$cargo_home" \
-  RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}" \
+  RUSTUP_HOME="$rustup_home" \
   CARGO_TERM_COLOR=never \
   CARGO_ENCODED_RUSTFLAGS="$encoded_rustflags" \
   LANG=C.UTF-8 \
   LC_ALL=C \
   SOURCE_DATE_EPOCH=0 \
   TMPDIR=/tmp \
-  cargo +"$required_rust" rustc \
+  "$root/.canonical-bin/cargo" +"$required_rust" rustc \
     --jobs 1 \
     --locked \
     --manifest-path "$root/Cargo.toml" \
