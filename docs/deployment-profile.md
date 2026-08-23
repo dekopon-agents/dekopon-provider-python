@@ -34,18 +34,18 @@ on an Apple-silicon Mac (2026-08-23):
 
 | Measurement | Result |
 |---|---:|
-| raw core | 20,303,662 bytes |
-| component | 20,303,342 bytes |
-| SHA-256 | `63d2aa178648e5cbfddbcc97808f9135e0a9113cc26ad33d41e1d70ddeae6ad2` |
+| raw core | 20,304,110 bytes |
+| component | 20,303,790 bytes |
+| SHA-256 | `5f1938396794af6cbd522bd031e0a729cca59413742f98cda36a30cac308f713` |
 | component/core imports | 0 / 0 |
 | core memories | 1, minimum 150 pages (9,830,400 bytes), host-capped |
 | core tables | 1, fixed 6,015 funcrefs |
 | 50,000,000 fuel | `OutOfFuel` during startup |
 | 100,000,000 fuel | normal `result = 2` success |
-| three warm calls at 100M | 11.32–14.55 ms, 12.50 ms mean |
-| cold CLI process | 2.01 s real |
-| cold maximum resident set size (`time -l`) | 570,048,512 bytes |
-| cold Darwin peak-memory-footprint counter | 456,164,216 bytes |
+| three warm calls at 100M | 11.38–14.72 ms, 12.75 ms mean |
+| cold CLI process | 1.85 s real |
+| cold maximum resident set size (`time -l`) | 598,540,288 bytes |
+| cold Darwin peak-memory-footprint counter | 447,791,968 bytes |
 
 `./scripts/measure-final-artifact.sh python-provider.wasm` writes the machine-readable record to
 `/tmp/dekopon-python-measurements.json`, captures raw core declarations, repeats the fuel bracket,
@@ -60,7 +60,7 @@ absent and reserves one `maxMemoryBytes` unit per live store; it does not accoun
 compiled code, Cranelift/component compilation, or host allocations. Compilation is also outside
 fuel and invocation deadlines.
 
-The measured single cold compiler process already reached roughly 570 MB RSS. Until
+The measured single cold compiler process already reached roughly 599 MB RSS. Until
 platform-specific RSS and concurrency load tests establish a tighter number, budget at least
 **768 MiB plus admitted concurrent guest reservations** for one compiler/connection profile; do
 not derive a container limit from the 64 MiB store ceiling alone.
