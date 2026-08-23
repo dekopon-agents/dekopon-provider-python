@@ -27,7 +27,13 @@ for required in \
   'ghcr.io/dekopon-agents/provider-python' \
   'application/vnd.dekopon.provider.v1+wasm' \
   'application/wasm' \
-  'PROVIDER_PYTHON_RELEASE_APPROVED'; do
+  'PROVIDER_PYTHON_RELEASE_APPROVED' \
+  'OCI_STAGING_REPOSITORY' \
+  'run-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT' \
+  'manifest delete --force' \
+  'initial_visibility' \
+  'remove only this run' \
+  'always() && failure()'; do
   grep -Fq "$required" "$release" || { echo "error: release workflow lacks $required" >&2; exit 1; }
 done
 if grep -E 'provider-python:(latest|stable)|--tag[ =]+latest' "$release"; then

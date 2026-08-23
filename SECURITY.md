@@ -18,9 +18,12 @@ Python import hook:
 - the component and every nested core module have zero imports;
 - there is no WASI adapter, JavaScript/browser binding, environment, filesystem, network, HTTP,
   storage, clock, entropy, subprocess, dynamic-library, or provider-dispatch import;
-- `allow_external_library` is false and the public import roots are `json`, `re`, and `yaml` only;
-- `open`, `input`, and `breakpoint` are removed; guest `compile`, `eval`, and `exec` are guarded and
-  denied outside trusted frozen-module initialization;
+- `allow_external_library` is false and the exact public import names are `json`, `re`, and `yaml`
+  only; private dependency modules are preloaded below the guest-visible import guard;
+- `open`, `input`, `breakpoint`, `compile`, `eval`, and `exec` are removed after trusted frozen
+  modules are preloaded; no original privileged callable is retained on a Python-reachable object;
+- the Python-visible module registry is replaced with the three exact public modules, and denied
+  transitive module references are removed from loaded module namespaces;
 - `sys`, `os`, `pathlib`, `time`, `random`, `secrets`, `socket`, `ssl`, `sqlite3`, `subprocess`,
   `threading`, `ctypes`, `tkinter`, and `webbrowser` are denied.
 

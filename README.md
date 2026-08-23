@@ -125,7 +125,8 @@ custom conversion hooks, and unsupported objects are rejected.
 
 ### Supported modules
 
-Only these public import roots are compatibility promises:
+Only these exact public module names are compatibility promises; direct imports of private
+submodules such as `re._parser` and `json.decoder` are denied:
 
 - `json` — RustPython's frozen Python JSON module and native acceleration;
 - `re` — RustPython's Python regular-expression module / `_sre` implementation;

@@ -126,22 +126,28 @@ async fn broker_terminates_deadline_fuel_and_memory_exhaustion()
     let fuel_detail = format!("{fuel_error:?}").to_ascii_lowercase();
     assert!(fuel_detail.contains("fuel"), "{fuel_detail}");
 
-    let low_memory_limits = BrokerHostLimits {
-        max_memory_bytes: 16 * 1024 * 1024,
+    let selected_memory_limits = BrokerHostLimits {
+        max_memory_bytes: 64 * 1024 * 1024,
         fuel: 1_000_000_000,
         max_timeout: Duration::from_secs(5),
         ..BrokerHostLimits::default()
     };
-    let low_memory = FakeBroker::builder()
+    let selected_memory = FakeBroker::builder()
         .component(component)
         .provider("python")
-        .host_limits(low_memory_limits)
+        .host_limits(selected_memory_limits)
         .compile_cache(cache)
         .timeout_ms(5_000)
         .max_output_bytes(786_432)
         .build()
         .await?;
-    let memory_error = match low_memory
+    let memory_ok = selected_memory
+        .invoke("python.eval", json!({"script": "result = 2"}))
+        .await?;
+    assert_eq!(memory_ok["ok"], true);
+    assert_eq!(memory_ok["result"], 2);
+
+    let memory_error = match selected_memory
         .invoke(
             "python.eval",
             json!({"script": "result = bytearray(100000000)"}),

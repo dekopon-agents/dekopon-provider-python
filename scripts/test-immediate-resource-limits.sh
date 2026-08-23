@@ -27,13 +27,15 @@ if "${base[@]}" --max-memory-bytes 67108864 --fuel 8000000000 --timeout-ms 50 \
 fi
 grep -Eqi 'deadline|epoch|interrupt' /tmp/dekopon-python-deadline.err
 
-# A low linear-memory ceiling must fail closed; it may stop VM startup before the allocation line.
-if "${base[@]}" --max-memory-bytes 8388608 --fuel 1000000000 --timeout-ms 5000 \
+# The selected 64 MiB profile reached guest execution above. Under that same profile, a hostile
+# allocation substantially larger than the ceiling must terminate as a host resource error rather
+# than a structured provider result.
+if "${base[@]}" --max-memory-bytes 67108864 --fuel 1000000000 --timeout-ms 5000 \
   python.eval --input '{"script":"result = bytearray(100000000)"}' >/tmp/dekopon-python-memory.out 2>/tmp/dekopon-python-memory.err; then
-  echo "error: low-memory allocation unexpectedly succeeded" >&2
+  echo "error: allocation beyond the selected memory profile unexpectedly succeeded" >&2
   exit 1
 fi
-grep -Eqi 'memory|grow|limit|allocation|resource' /tmp/dekopon-python-memory.err
+grep -Eqi 'memory|grow|limit|allocation|resource|unreachable' /tmp/dekopon-python-memory.err
 
 # Python recursion is a structured guest error under the working host profile.
 "${base[@]}" --max-memory-bytes 67108864 --fuel 500000000 --timeout-ms 5000 \

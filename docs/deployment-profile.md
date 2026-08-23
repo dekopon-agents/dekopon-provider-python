@@ -34,18 +34,19 @@ on an Apple-silicon Mac (2026-08-23):
 
 | Measurement | Result |
 |---|---:|
-| raw core | 20,304,110 bytes |
-| component | 20,303,790 bytes |
-| SHA-256 | `5f1938396794af6cbd522bd031e0a729cca59413742f98cda36a30cac308f713` |
+| raw core | 20,305,415 bytes |
+| component | 20,305,095 bytes |
+| SHA-256 | `56e8a97a939687165b8a64edc9dc4373a1cbb4c64823923659c0dd627df703a1` |
 | component/core imports | 0 / 0 |
 | core memories | 1, minimum 150 pages (9,830,400 bytes), host-capped |
 | core tables | 1, fixed 6,015 funcrefs |
 | 50,000,000 fuel | `OutOfFuel` during startup |
-| 100,000,000 fuel | normal `result = 2` success |
-| repeated warm calls at 100M | 11.02–14.72 ms; 12.26–12.75 ms run means |
-| cold CLI process (two runs) | 1.85–2.08 s real |
-| cold maximum resident set size (`time -l`) | 582,631,424–598,540,288 bytes |
-| cold Darwin peak-memory-footprint counter | 447,791,968–453,116,792 bytes |
+| 100,000,000 / 250,000,000 fuel | `OutOfFuel` during eager policy initialization |
+| 500,000,000 fuel | normal `result = 2` success |
+| repeated warm calls at 500M | 45.95–51.54 ms; 47.62–48.21 ms run means |
+| cold CLI process (two runs) | 1.93–2.08 s real |
+| cold maximum resident set size (`time -l`) | 580,845,568–591,495,168 bytes |
+| cold Darwin peak-memory-footprint counter | 431,489,912–436,568,856 bytes |
 
 `./scripts/measure-final-artifact.sh python-provider.wasm` writes the machine-readable record to
 `/tmp/dekopon-python-measurements.json`, captures raw core declarations, repeats the fuel bracket,
@@ -60,7 +61,7 @@ absent and reserves one `maxMemoryBytes` unit per live store; it does not accoun
 compiled code, Cranelift/component compilation, or host allocations. Compilation is also outside
 fuel and invocation deadlines.
 
-The measured single cold compiler process reached up to roughly 599 MB RSS. Until
+The measured single cold compiler process reached up to roughly 591 MB RSS. Until
 platform-specific RSS and concurrency load tests establish a tighter number, budget at least
 **768 MiB plus admitted concurrent guest reservations** for one compiler/connection profile; do
 not derive a container limit from the 64 MiB store ceiling alone.

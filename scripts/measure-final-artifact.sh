@@ -11,13 +11,19 @@ sha=$(sha256sum "$component" | awk '{print $1}')
 raw_bytes=$(wc -c <"$raw" | tr -d ' ')
 
 # Pin a measured normal startup bracket for this exact build.
-if dekopon-run invoke --provider "$component" --compile-cache "$cache" --fuel 50000000 \
+if dekopon-run -vv invoke --provider "$component" --compile-cache "$cache" --fuel 50000000 \
   --timeout-ms 5000 python.eval --input '{"script":"result = 2"}' >/tmp/python-measure-low.out 2>/tmp/python-measure-low.err; then
-  low_fuel="unexpected-success"
-else
-  low_fuel="out-of-fuel"
+  echo "error: 50M-fuel measurement probe unexpectedly succeeded" >&2
+  exit 1
 fi
-normal=$(dekopon-run invoke --provider "$component" --compile-cache "$cache" --fuel 100000000 \
+if ! grep -Eqi 'OutOfFuel|all fuel consumed|fuel[^[:alnum:]]*(exhausted|consumed)' \
+  /tmp/python-measure-low.err; then
+  echo "error: 50M-fuel probe failed for a reason other than fuel exhaustion" >&2
+  cat /tmp/python-measure-low.err >&2
+  exit 1
+fi
+low_fuel="out-of-fuel"
+normal=$(dekopon-run invoke --provider "$component" --compile-cache "$cache" --fuel 500000000 \
   --timeout-ms 5000 --repeat 3 python.eval --input '{"script":"result = 2"}')
 
 cold_log=/tmp/dekopon-python-cold-time.txt
@@ -41,7 +47,7 @@ record = {
     "rawCoreBytes": int(sys.argv[2]),
     "sha256": sys.argv[3],
     "fuel50000000": sys.argv[4],
-    "normalFuel": 100_000_000,
+    "normalFuel": 500_000_000,
     "dedicatedImmediateFuel": 500_000_000,
     "selectedBrokerFuel": 1_000_000_000,
     "coldTimeRaw": pathlib.Path(sys.argv[5]).read_text(errors="replace")[-8192:],

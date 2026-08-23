@@ -21,6 +21,7 @@ env:
   ORAS_VERSION: "1.2.3"
   ORAS_LINUX_AMD64_SHA256: "b4efc97a91f471f323f193ea4b4d63d8ff443ca3aab514151a30751330852827"
   OCI_REPOSITORY: "ghcr.io/dekopon-agents/provider-python"
+  OCI_STAGING_REPOSITORY: "ghcr.io/dekopon-agents/provider-python-staging"
 
 jobs:
   build:
@@ -183,7 +184,7 @@ jobs:
           cmp dist/python-provider.wasm.sha256 "$RUNNER_TEMP/redownload/python-provider.wasm.sha256"
 
   ghcr:
-    name: publish identical public OCI artifact
+    name: stage run-owned OCI manifest by digest
     needs: [build, draft]
     runs-on: ubuntu-24.04
     permissions:
@@ -191,6 +192,8 @@ jobs:
       packages: write
     outputs:
       manifest_digest: ${{ steps.publish.outputs.manifest_digest }}
+      staging_ref: ${{ steps.publish.outputs.staging_ref }}
+      initial_visibility: ${{ steps.publish.outputs.initial_visibility }}
     steps:
       - name: Download exact component
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -216,78 +219,190 @@ jobs:
           echo "$ORAS_LINUX_AMD64_SHA256  $RUNNER_TEMP/$archive" | sha256sum --check --strict
           tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" oras
           install -m 0755 "$RUNNER_TEMP/oras" "$RUNNER_TEMP/oras-bin"
-      - name: Push one identical Wasm layer with no latest tag
+      - name: Refuse an existing version and stage one run-owned manifest
         id: publish
         env:
+          GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.build.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
           test "$VERSION" = 0.1.0
-          ref="$OCI_REPOSITORY:$VERSION"
-          "$RUNNER_TEMP/oras-bin" push "$ref" \
+          version_ref="$OCI_REPOSITORY:$VERSION"
+          if "$RUNNER_TEMP/oras-bin" manifest fetch "$version_ref" \
+            >"$RUNNER_TEMP/existing-manifest.json" 2>"$RUNNER_TEMP/existing-manifest.err"; then
+            echo "error: immutable OCI version already exists: $version_ref" >&2
+            exit 1
+          fi
+          if ! grep -Eqi 'not found|manifest unknown|MANIFEST_UNKNOWN|404' \
+            "$RUNNER_TEMP/existing-manifest.err"; then
+            echo "error: could not prove that $version_ref is absent" >&2
+            cat "$RUNNER_TEMP/existing-manifest.err" >&2
+            exit 1
+          fi
+
+          if initial_visibility=$(gh api \
+            '/orgs/dekopon-agents/packages/container/provider-python' --jq .visibility \
+            2>"$RUNNER_TEMP/package-visibility.err"); then
+            test "$initial_visibility" = private -o "$initial_visibility" = public
+          elif grep -Eqi 'not found|404' "$RUNNER_TEMP/package-visibility.err"; then
+            initial_visibility=absent
+          else
+            cat "$RUNNER_TEMP/package-visibility.err" >&2
+            exit 1
+          fi
+
+          staging_tag="run-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          staging_ref="$OCI_STAGING_REPOSITORY:$staging_tag"
+          if "$RUNNER_TEMP/oras-bin" manifest fetch "$staging_ref" \
+            >"$RUNNER_TEMP/existing-staging.json" 2>"$RUNNER_TEMP/existing-staging.err"; then
+            echo "error: run-owned staging tag already exists: $staging_ref" >&2
+            exit 1
+          fi
+          grep -Eqi 'not found|manifest unknown|MANIFEST_UNKNOWN|404' \
+            "$RUNNER_TEMP/existing-staging.err"
+
+          staged=false
+          cleanup_staging_on_error() {
+            if [[ "$staged" = true ]] && descriptor=$("$RUNNER_TEMP/oras-bin" \
+              manifest fetch --descriptor "$staging_ref" 2>/dev/null); then
+              cleanup_digest=$(jq -er .digest <<<"$descriptor")
+              if "$RUNNER_TEMP/oras-bin" manifest fetch \
+                "$OCI_STAGING_REPOSITORY@$cleanup_digest" >"$RUNNER_TEMP/cleanup-stage.json" \
+                && jq -e --arg run "$GITHUB_RUN_ID:$GITHUB_RUN_ATTEMPT" \
+                  '.annotations["org.dekopon.release.run"] == $run' \
+                  "$RUNNER_TEMP/cleanup-stage.json" >/dev/null; then
+                "$RUNNER_TEMP/oras-bin" manifest delete --force \
+                  "$OCI_STAGING_REPOSITORY@$cleanup_digest" || true
+              fi
+            fi
+          }
+          trap cleanup_staging_on_error ERR
+
+          "$RUNNER_TEMP/oras-bin" push "$staging_ref" \
             --artifact-type application/vnd.dekopon.provider.v1+wasm \
             --annotation "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            --annotation "org.dekopon.release.run=$GITHUB_RUN_ID:$GITHUB_RUN_ATTEMPT" \
             dist/python-provider.wasm:application/wasm
-          "$RUNNER_TEMP/oras-bin" manifest fetch "$ref" >"$RUNNER_TEMP/manifest.json"
+          staged=true
+          gh api --method PUT \
+            '/orgs/dekopon-agents/packages/container/provider-python-staging/visibility' \
+            -f visibility=private >/dev/null
+          test "$(gh api '/orgs/dekopon-agents/packages/container/provider-python-staging' \
+            --jq .visibility)" = private
+          digest=$("$RUNNER_TEMP/oras-bin" manifest fetch --descriptor "$staging_ref" | jq -er .digest)
+          test "$digest" = "sha256:$(printf %s "$digest" | sed -nE 's/^sha256:([0-9a-f]{64})$/\1/p')"
+          "$RUNNER_TEMP/oras-bin" manifest fetch "$OCI_STAGING_REPOSITORY@$digest" \
+            >"$RUNNER_TEMP/manifest.json"
           expected="sha256:$(awk '{print $1}' dist/python-provider.wasm.sha256)"
-          jq -e --arg expected "$expected" '
+          jq -e --arg expected "$expected" --arg run "$GITHUB_RUN_ID:$GITHUB_RUN_ATTEMPT" '
             .artifactType == "application/vnd.dekopon.provider.v1+wasm" and
+            (.annotations["org.dekopon.release.run"] == $run) and
             (.layers | length) == 1 and
             .layers[0].mediaType == "application/wasm" and
             .layers[0].digest == $expected and
             (.config.size == 2 or .config.size == 0)
           ' "$RUNNER_TEMP/manifest.json" >/dev/null
-          digest=$("$RUNNER_TEMP/oras-bin" manifest fetch --descriptor "$ref" | jq -er .digest)
-          echo "manifest_digest=$digest" >>"$GITHUB_OUTPUT"
-      - name: Set and read back public visibility
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          gh api --method PUT \
-            "/orgs/dekopon-agents/packages/container/provider-python/visibility" \
-            -f visibility=public >/dev/null
-          test "$(gh api '/orgs/dekopon-agents/packages/container/provider-python' --jq .visibility)" = public
-      - name: Verify anonymous manifest, blob, and byte identity
-        env:
-          VERSION: ${{ needs.build.outputs.version }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          docker logout ghcr.io
-          ref="$OCI_REPOSITORY:$VERSION"
-          "$RUNNER_TEMP/oras-bin" manifest fetch "$ref" >"$RUNNER_TEMP/anonymous-manifest.json"
-          mkdir "$RUNNER_TEMP/anonymous-pull"
-          "$RUNNER_TEMP/oras-bin" pull "$ref" --output "$RUNNER_TEMP/anonymous-pull"
-          cmp dist/python-provider.wasm "$RUNNER_TEMP/anonymous-pull/python-provider.wasm"
-          expected="sha256:$(awk '{print $1}' dist/python-provider.wasm.sha256)"
-          test "$(jq -r '.layers[0].digest' "$RUNNER_TEMP/anonymous-manifest.json")" = "$expected"
+          {
+            echo "manifest_digest=$digest"
+            echo "staging_ref=$staging_ref"
+            echo "initial_visibility=$initial_visibility"
+          } >>"$GITHUB_OUTPUT"
+          trap - ERR
 
   finalize:
-    name: finalize exact draft by ID
+    name: publish immutable OCI version and finalize exact draft
     needs: [build, draft, ghcr]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+      packages: write
     env:
       GH_REPO: ${{ github.repository }}
     steps:
-      - name: Verify marked draft and finalize by release ID
+      - name: Download exact component
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-component
+          path: dist
+      - name: Verify exact component and install pinned ORAS
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(find dist -maxdepth 1 -type f | wc -l)" -eq 2
+          (cd dist && sha256sum --check --strict python-provider.wasm.sha256)
+          archive="oras_${ORAS_VERSION}_linux_amd64.tar.gz"
+          curl --fail --silent --show-error --location \
+            "https://github.com/oras-project/oras/releases/download/v${ORAS_VERSION}/${archive}" \
+            --output "$RUNNER_TEMP/$archive"
+          echo "$ORAS_LINUX_AMD64_SHA256  $RUNNER_TEMP/$archive" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" oras
+          install -m 0755 "$RUNNER_TEMP/oras" "$RUNNER_TEMP/oras-bin"
+      - name: Authenticate to GHCR with the job token
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish by staged digest, verify anonymously, then finalize
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_ID: ${{ needs.draft.outputs.release_id }}
           MARKER: ${{ needs.draft.outputs.marker }}
+          MANIFEST_DIGEST: ${{ needs.ghcr.outputs.manifest_digest }}
+          STAGING_REF: ${{ needs.ghcr.outputs.staging_ref }}
+          VERSION: ${{ needs.build.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
+          [[ "$MANIFEST_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          test "$STAGING_REF" = "$OCI_STAGING_REPOSITORY:run-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+
           gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" >"$RUNNER_TEMP/draft.json"
           test "$(jq -r .draft "$RUNNER_TEMP/draft.json")" = true
           test "$(jq -r .tag_name "$RUNNER_TEMP/draft.json")" = v0.1.0
           test "$(jq -r .body "$RUNNER_TEMP/draft.json")" = "$MARKER"
           assets=$(jq -r '[.assets[].name] | sort | join("\n")' "$RUNNER_TEMP/draft.json")
           test "$assets" = $'python-provider.wasm\npython-provider.wasm.sha256'
+
+          test "$("$RUNNER_TEMP/oras-bin" manifest fetch --descriptor \
+            "$OCI_STAGING_REPOSITORY@$MANIFEST_DIGEST" | jq -er .digest)" = "$MANIFEST_DIGEST"
+          version_ref="$OCI_REPOSITORY:$VERSION"
+          if "$RUNNER_TEMP/oras-bin" manifest fetch "$version_ref" \
+            >"$RUNNER_TEMP/existing-version.json" 2>"$RUNNER_TEMP/existing-version.err"; then
+            echo "error: immutable OCI version appeared during release: $version_ref" >&2
+            exit 1
+          fi
+          grep -Eqi 'not found|manifest unknown|MANIFEST_UNKNOWN|404' \
+            "$RUNNER_TEMP/existing-version.err"
+
+          "$RUNNER_TEMP/oras-bin" cp \
+            "$OCI_STAGING_REPOSITORY@$MANIFEST_DIGEST" "$version_ref"
+          test "$("$RUNNER_TEMP/oras-bin" manifest fetch --descriptor "$version_ref" \
+            | jq -er .digest)" = "$MANIFEST_DIGEST"
+          "$RUNNER_TEMP/oras-bin" manifest delete --force \
+            "$OCI_STAGING_REPOSITORY@$MANIFEST_DIGEST"
+
+          gh api --method PUT \
+            "/orgs/dekopon-agents/packages/container/provider-python/visibility" \
+            -f visibility=public >/dev/null
+          test "$(gh api '/orgs/dekopon-agents/packages/container/provider-python' \
+            --jq .visibility)" = public
+
+          docker logout ghcr.io
+          test "$("$RUNNER_TEMP/oras-bin" manifest fetch --descriptor "$version_ref" \
+            | jq -er .digest)" = "$MANIFEST_DIGEST"
+          "$RUNNER_TEMP/oras-bin" manifest fetch "$OCI_REPOSITORY@$MANIFEST_DIGEST" \
+            >"$RUNNER_TEMP/anonymous-manifest.json"
+          mkdir "$RUNNER_TEMP/anonymous-pull"
+          "$RUNNER_TEMP/oras-bin" pull "$OCI_REPOSITORY@$MANIFEST_DIGEST" \
+            --output "$RUNNER_TEMP/anonymous-pull"
+          cmp dist/python-provider.wasm "$RUNNER_TEMP/anonymous-pull/python-provider.wasm"
+          expected="sha256:$(awk '{print $1}' dist/python-provider.wasm.sha256)"
+          test "$(jq -r '.layers[0].digest' "$RUNNER_TEMP/anonymous-manifest.json")" = "$expected"
+
+          # This is deliberately the final mutating operation. Any earlier failure leaves a marked
+          # draft and run-unique OCI manifest for the verified cleanup job below.
           gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" \
             -F draft=false >"$RUNNER_TEMP/published.json"
           test "$(jq -r .draft "$RUNNER_TEMP/published.json")" = false
@@ -327,26 +442,85 @@ jobs:
           cmp release/python-provider.wasm oci/python-provider.wasm
           test "sha256:$(sha256sum release/python-provider.wasm | awk '{print $1}')" != ""
 
-  cleanup_failed_draft:
-    name: remove only this run's failed draft
-    if: failure() && needs.draft.outputs.release_id != ''
-    needs: [draft, ghcr, finalize]
+  cleanup_failed_release:
+    name: remove only this run's verified release effects
+    if: ${{ always() && failure() && needs.draft.outputs.release_id != '' }}
+    needs: [build, draft, ghcr, finalize, post_release]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+      packages: write
     steps:
-      - name: Verify marker and delete only the run-owned draft
+      - name: Install pinned ORAS
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="oras_${ORAS_VERSION}_linux_amd64.tar.gz"
+          curl --fail --silent --show-error --location \
+            "https://github.com/oras-project/oras/releases/download/v${ORAS_VERSION}/${archive}" \
+            --output "$RUNNER_TEMP/$archive"
+          echo "$ORAS_LINUX_AMD64_SHA256  $RUNNER_TEMP/$archive" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" oras
+      - name: Authenticate to GHCR with the job token
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify ownership before deleting the release and OCI manifest
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_ID: ${{ needs.draft.outputs.release_id }}
           MARKER: ${{ needs.draft.outputs.marker }}
+          MANIFEST_DIGEST: ${{ needs.ghcr.outputs.manifest_digest }}
+          STAGING_REF: ${{ needs.ghcr.outputs.staging_ref }}
+          INITIAL_VISIBILITY: ${{ needs.ghcr.outputs.initial_visibility }}
         shell: bash
         run: |
           set -euo pipefail
-          if ! gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" >"$RUNNER_TEMP/release.json" 2>/dev/null; then
+          if ! gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" \
+            >"$RUNNER_TEMP/release.json" 2>/dev/null; then
             exit 0
           fi
-          test "$(jq -r .draft "$RUNNER_TEMP/release.json")" = true || exit 0
-          test "$(jq -r .body "$RUNNER_TEMP/release.json")" = "$MARKER" || exit 0
+          test "$(jq -r .tag_name "$RUNNER_TEMP/release.json")" = v0.1.0
+          test "$(jq -r .body "$RUNNER_TEMP/release.json")" = "$MARKER"
+
+          if [[ -n "$MANIFEST_DIGEST" ]]; then
+            [[ "$MANIFEST_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+            test "$STAGING_REF" = "$OCI_STAGING_REPOSITORY:run-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+            for repository in "$OCI_STAGING_REPOSITORY" "$OCI_REPOSITORY"; do
+              if found=$("$RUNNER_TEMP/oras" manifest fetch --descriptor \
+                "$repository@$MANIFEST_DIGEST" 2>"$RUNNER_TEMP/cleanup-fetch.err"); then
+                test "$(jq -er .digest <<<"$found")" = "$MANIFEST_DIGEST"
+              elif ! grep -Eqi 'not found|manifest unknown|MANIFEST_UNKNOWN|404' \
+                "$RUNNER_TEMP/cleanup-fetch.err"; then
+                cat "$RUNNER_TEMP/cleanup-fetch.err" >&2
+                exit 1
+              fi
+            done
+
+            for repository in "$OCI_STAGING_REPOSITORY" "$OCI_REPOSITORY"; do
+              if ! "$RUNNER_TEMP/oras" manifest delete --force \
+                "$repository@$MANIFEST_DIGEST" 2>"$RUNNER_TEMP/cleanup-delete.err"; then
+                grep -Eqi 'not found|manifest unknown|MANIFEST_UNKNOWN|404' \
+                  "$RUNNER_TEMP/cleanup-delete.err" || {
+                    cat "$RUNNER_TEMP/cleanup-delete.err" >&2
+                    exit 1
+                  }
+              fi
+            done
+
+            if [[ "$INITIAL_VISIBILITY" = private || "$INITIAL_VISIBILITY" = absent ]]; then
+              if gh api '/orgs/dekopon-agents/packages/container/provider-python' \
+                >/dev/null 2>"$RUNNER_TEMP/cleanup-visibility.err"; then
+                gh api --method PUT \
+                  '/orgs/dekopon-agents/packages/container/provider-python/visibility' \
+                  -f visibility=private >/dev/null
+              elif ! grep -Eqi 'not found|404' "$RUNNER_TEMP/cleanup-visibility.err"; then
+                cat "$RUNNER_TEMP/cleanup-visibility.err" >&2
+                exit 1
+              fi
+            fi
+          fi
+
           gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID"
-          echo "OCI cleanup, if needed, is keyed by manifest digest: ${{ needs.ghcr.outputs.manifest_digest }}"

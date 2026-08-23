@@ -1,16 +1,24 @@
-use std::cell::Cell;
+use rustpython_vm::{AsObject, PyResult, TryFromObject, VirtualMachine, builtins::PyDictRef};
 
-use rustpython_vm::{PyResult, VirtualMachine};
-
-const ALLOWED_ROOTS: [&str; 3] = ["json", "re", "yaml"];
-const REMOVED_BUILTINS: [&str; 3] = ["open", "input", "breakpoint"];
-const GUARDED_BUILTINS: [&str; 3] = ["compile", "eval", "exec"];
-
-thread_local! {
-    // Non-zero only while trusted frozen/native code is resolving the private dependency closure
-    // of an allowlisted public root. A top-level guest import never inherits this state.
-    static TRUSTED_IMPORT_DEPTH: Cell<usize> = const { Cell::new(0) };
-}
+const ALLOWED_MODULES: [&str; 3] = ["json", "re", "yaml"];
+const REMOVED_BUILTINS: [&str; 6] = ["open", "input", "breakpoint", "compile", "eval", "exec"];
+const DENIED_MODULES: [&str; 15] = [
+    "sys",
+    "os",
+    "pathlib",
+    "time",
+    "random",
+    "secrets",
+    "socket",
+    "ssl",
+    "sqlite3",
+    "subprocess",
+    "threading",
+    "ctypes",
+    "tkinter",
+    "webbrowser",
+    "_dekopon_policy",
+];
 
 #[rustpython_vm::pymodule(name = "_dekopon_policy")]
 pub(crate) mod policy_module {
@@ -39,95 +47,126 @@ pub(crate) mod policy_module {
             .map(|value| i32::try_from_object(vm, value))
             .transpose()?
             .unwrap_or(0);
-        let nested = super::TRUSTED_IMPORT_DEPTH.with(|depth| depth.get() != 0);
-        if !nested && (level != 0 || !super::is_allowed_root(name)) {
+        if level != 0 || !super::is_allowed_module(name) {
             return Err(vm.new_import_error(
                 format!("import of '{name}' is not permitted"),
                 vm.ctx.new_utf8_str(name),
             ));
         }
 
+        // All public modules and their private dependency closures are loaded before this guard is
+        // installed. Return only an exact public module from the Rust-owned sys module rather than
+        // retaining or invoking Python-visible importlib/original-import callables.
         let modules = vm.sys_module.get_attr("modules", vm)?;
-        let policy = modules.get_item("_dekopon_policy", vm)?;
-        let original = policy.get_attr("_original_import", vm)?;
-        super::TRUSTED_IMPORT_DEPTH.with(|depth| {
-            let previous = depth.get();
-            depth.set(previous.saturating_add(1));
-            let result = original.call(args, vm);
-            depth.set(previous);
-            result
-        })
+        modules.get_item(name, vm)
     }
-
-    #[pyfunction]
-    fn guarded_compile(args: FuncArgs, vm: &VirtualMachine) -> PyResult {
-        super::call_guarded_builtin("compile", args, vm)
-    }
-
-    #[pyfunction]
-    fn guarded_eval(args: FuncArgs, vm: &VirtualMachine) -> PyResult {
-        super::call_guarded_builtin("eval", args, vm)
-    }
-
-    #[pyfunction]
-    fn guarded_exec(args: FuncArgs, vm: &VirtualMachine) -> PyResult {
-        super::call_guarded_builtin("exec", args, vm)
-    }
-}
-
-fn call_guarded_builtin(
-    name: &str,
-    args: rustpython_vm::function::FuncArgs,
-    vm: &VirtualMachine,
-) -> PyResult {
-    let trusted = TRUSTED_IMPORT_DEPTH.with(|depth| depth.get() != 0);
-    if !trusted {
-        return Err(vm.new_runtime_error(format!("builtin '{name}' is not permitted")));
-    }
-    let modules = vm.sys_module.get_attr("modules", vm)?;
-    let policy = modules.get_item("_dekopon_policy", vm)?;
-    let original = policy.get_attr(vm.ctx.intern_str(format!("_original_{name}")), vm)?;
-    original.call(args, vm)
 }
 
 pub(crate) fn install(vm: &VirtualMachine) -> PyResult<()> {
-    // Public imports are loaded lazily. During one allowlisted root import, its trusted frozen
-    // implementation may resolve private dependencies; direct guest imports of those same names
-    // remain denied once the root import returns.
+    // Resolve the complete frozen/native dependency closure while the VM still has its pristine
+    // internal import machinery. Guest imports never execute that machinery.
+    let public_modules = ALLOWED_MODULES
+        .iter()
+        .map(|name| vm.import(*name, 0).map(|module| (*name, module)))
+        .collect::<PyResult<Vec<_>>>()?;
     let policy = vm.import("_dekopon_policy", 0)?;
-    let original = vm.builtins.get_attr("__import__", vm)?;
-    policy.set_attr("_original_import", original, vm)?;
-    let guarded = policy.get_attr("guarded_import", vm)?;
-    vm.builtins.set_attr("__import__", guarded, vm)?;
+    let guarded_import = policy.get_attr("guarded_import", vm)?;
 
+    let modules_object = vm.sys_module.get_attr("modules", vm)?;
+    let modules = PyDictRef::try_from_object(vm, modules_object)?;
+
+    // Capture identities before removing the builtins. If importlib or a transitive frozen module
+    // aliased one of these privileged callables, remove that alias too; comparing object identity
+    // avoids deleting unrelated public functions such as re.compile.
+    let privileged_callables = ["__import__"]
+        .into_iter()
+        .chain(REMOVED_BUILTINS)
+        .filter_map(|name| vm.builtins.get_attr(name, vm).ok())
+        .collect::<Vec<_>>();
+    let denied_modules = DENIED_MODULES
+        .iter()
+        .filter_map(|name| modules.get_item(*name, vm).ok())
+        .collect::<Vec<_>>();
+
+    for module in modules.values_vec() {
+        // Module specs/loaders lead back into frozen importlib functions that are not part of the
+        // public module contract. They are unnecessary after eager loading and would otherwise be
+        // an alternate path around the exact-name guard.
+        for metadata in ["__loader__", "__spec__", "__cached__", "__file__"] {
+            let _removed = module.del_attr(metadata, vm);
+        }
+        let Ok(namespace) = module.get_attr("__dict__", vm) else {
+            continue;
+        };
+        let Ok(namespace) = PyDictRef::try_from_object(vm, namespace) else {
+            continue;
+        };
+        for (key, value) in namespace.items_vec() {
+            let privileged = privileged_callables
+                .iter()
+                .any(|callable| value.is(callable));
+            let denied_reference = denied_modules
+                .iter()
+                .any(|denied_module| value.is(denied_module));
+            if privileged || denied_reference {
+                let _removed = namespace.del_item(key.as_object(), vm);
+            }
+        }
+    }
+
+    // enum is an implementation detail of re and was the shortest path to enum.sys.modules.
+    // RegexFlag has already been constructed, and normal matching/compilation does not need this
+    // module-global reference after initialization.
+    if let Some((_, re_module)) = public_modules.iter().find(|(name, _)| *name == "re") {
+        let _removed = re_module.del_attr("enum", vm);
+    }
+
+    // RustPython's global type-subclass registry exposes frozen importlib loader classes (and its
+    // 0.5.0 enumeration can itself panic on internal static types). It is not part of python.eval's
+    // supported surface, so remove the Python-visible traversal after trusted initialization.
+    let type_type = vm.ctx.types.type_type;
+    type_type.modified();
+    if type_type
+        .attributes
+        .write()
+        .shift_remove(vm.ctx.intern_str("__subclasses__"))
+        .is_none()
+    {
+        return Err(vm.new_runtime_error("failed to close type introspection"));
+    }
+
+    vm.builtins.set_attr("__import__", guarded_import, vm)?;
     let builtins = vm.builtins.dict();
     for name in REMOVED_BUILTINS {
         let _removed = builtins.del_item(name, vm);
     }
-    for name in GUARDED_BUILTINS {
-        let original = builtins.get_item(name, vm)?;
-        policy.set_attr(vm.ctx.intern_str(format!("_original_{name}")), original, vm)?;
-        let guarded = policy.get_attr(vm.ctx.intern_str(format!("guarded_{name}")), vm)?;
-        builtins.set_item(name, guarded, vm)?;
+
+    // Replace the Python-visible registry with the closed public set. This removes importlib,
+    // policy-module, and denied-module recovery through any residual transitive sys reference.
+    let public_registry = vm.ctx.new_dict();
+    for (name, module) in public_modules {
+        public_registry.set_item(name, module, vm)?;
     }
+    vm.sys_module.set_attr("modules", public_registry, vm)?;
     Ok(())
 }
 
-pub(crate) fn is_allowed_root(name: &str) -> bool {
-    let root = name.split('.').next().unwrap_or_default();
-    ALLOWED_ROOTS.contains(&root)
+pub(crate) fn is_allowed_module(name: &str) -> bool {
+    ALLOWED_MODULES.contains(&name)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::is_allowed_root;
+    use super::is_allowed_module;
 
     #[test]
-    fn allowlist_is_root_based_and_closed() {
-        assert!(is_allowed_root("json"));
-        assert!(is_allowed_root("re._parser"));
-        assert!(is_allowed_root("yaml"));
+    fn allowlist_is_exact_and_closed() {
+        for allowed in ["json", "re", "yaml"] {
+            assert!(is_allowed_module(allowed), "{allowed}");
+        }
         for denied in [
+            "re._parser",
+            "json.decoder",
             "sys",
             "os",
             "time",
@@ -136,7 +175,7 @@ mod tests {
             "subprocess",
             "ctypes",
         ] {
-            assert!(!is_allowed_root(denied), "{denied}");
+            assert!(!is_allowed_module(denied), "{denied}");
         }
     }
 }

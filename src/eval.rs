@@ -252,15 +252,83 @@ result = {
             "import socket",
             "import subprocess",
             "import ctypes",
+            "import re._parser",
+            "import json.decoder",
             "open('/etc/passwd')",
             "input()",
             "breakpoint()",
             "eval('1 + 1')",
+            "exec('result = 1')",
+            "compile('1', 'guest', 'eval')",
         ] {
             let output = evaluate(script);
             assert_eq!(output["ok"], false, "{script}: {output}");
             assert_eq!(output["error"]["kind"], "runtime", "{script}: {output}");
         }
+    }
+
+    #[test]
+    fn denies_privileged_callable_and_module_recovery_by_introspection() {
+        let output = evaluate(
+            r#"
+import json
+import re
+checks = []
+
+# The reviewed exploit must not reach enum.sys.modules or the policy module.
+try:
+    checks.append(re.enum.sys.modules.get("_dekopon_policy") is None)
+except (AttributeError, KeyError):
+    checks.append(True)
+
+# Module metadata must not lead back to frozen importlib loaders, and function globals and
+# transitive modules must not retain denied module objects.
+for module in (json, re, re.search.__globals__["_compiler"]):
+    checks.append(not hasattr(module, "__loader__"))
+    checks.append(not hasattr(module, "__spec__"))
+for namespace in (
+    re.search.__globals__,
+    re.RegexFlag.__new__.__globals__,
+    json.loads.__globals__,
+    json.JSONDecoder.decode.__globals__,
+):
+    checks.append("sys" not in namespace)
+    checks.append("_original_import" not in namespace)
+    checks.append("_original_eval" not in namespace)
+    checks.append("_original_compile" not in namespace)
+
+builtins_view = re.search.__globals__["__builtins__"]
+if type(builtins_view) is dict:
+    checks.extend(name not in builtins_view for name in ("eval", "exec", "compile", "open"))
+else:
+    checks.extend(not hasattr(builtins_view, name) for name in ("eval", "exec", "compile", "open"))
+
+# Even a residual reference to sys must see only the closed public registry, and importlib loader
+# classes must not be recoverable through the classic object-subclass traversal.
+flag_globals = re.RegexFlag.__new__.__globals__
+checks.append(flag_globals.get("sys") is None)
+try:
+    subclasses = object.__subclasses__()
+except AttributeError:
+    checks.append(True)
+else:
+    recovered = False
+    for loader in subclasses:
+        if loader.__name__ in ("BuiltinImporter", "FrozenImporter"):
+            try:
+                loader.load_module("sys")
+            except Exception:
+                pass
+            else:
+                recovered = True
+    checks.append(not recovered)
+result = checks
+"#,
+        );
+        assert_eq!(output["ok"], true, "{output}");
+        let checks = output["result"].as_array().expect("check array");
+        assert!(!checks.is_empty());
+        assert!(checks.iter().all(|check| check == true), "{output}");
     }
 
     #[test]
