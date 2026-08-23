@@ -41,8 +41,8 @@ if [[ ${DEKOPON_PYTHON_CANONICAL_INNER:-0} != 1 ]]; then
     rm -rf "$lock"
   }
   trap cleanup EXIT
-  rm -rf "$canonical"
   mkdir -p "$canonical"
+  find "$canonical" -mindepth 1 -maxdepth 1 ! -name target -exec rm -rf {} +
 
   if git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     git -C "$root" archive --format=tar HEAD | tar -xf - -C "$canonical"
