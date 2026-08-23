@@ -1,0 +1,351 @@
+name: Release v0.1.0
+
+on:
+  push:
+    tags:
+      - "v0.1.0"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  PROVIDER_RUST_TOOLCHAIN: "1.97.0"
+  PROVIDER_MSRV: "1.93.0"
+  WASM_TOOLS_VERSION: "1.236.1"
+  CARGO_DENY_VERSION: "0.20.2"
+  DEKOPON_RUN_VERSION: "0.11.1"
+  ORAS_VERSION: "1.2.3"
+  ORAS_LINUX_AMD64_SHA256: "b4efc97a91f471f323f193ea4b4d63d8ff443ca3aab514151a30751330852827"
+  OCI_REPOSITORY: "ghcr.io/dekopon-agents/provider-python"
+
+jobs:
+  build:
+    name: verify immutable source and build
+    if: github.repository == 'dekopon-agents/dekopon-provider-python' && vars.PROVIDER_PYTHON_RELEASE_APPROVED == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.metadata.outputs.version }}
+    steps:
+      - name: Check out immutable tag without credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify annotated tag, exact version, main ancestry, and compliance interlock
+        id: metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = v0.1.0
+          test -f RELEASE_COMPLIANCE.md
+          git fetch --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
+          test "$(git cat-file -t "refs/tags/$GITHUB_REF_NAME")" = tag
+          test "$(git rev-parse "$GITHUB_REF_NAME^{}")" = "$GITHUB_SHA"
+          version=$(cargo metadata --locked --no-deps --format-version 1 \
+            | jq -er '.packages[] | select(.name == "dekopon-python-provider") | .version')
+          test "$version" = 0.1.0
+          test "$GITHUB_REF_NAME" = "v$version"
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main
+          test -z "$(git ls-files '*.wasm')"
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+      - name: Install pinned build and validation tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup toolchain install "$PROVIDER_MSRV" --profile minimal
+          rustup toolchain install "$PROVIDER_RUST_TOOLCHAIN" --profile minimal \
+            --component clippy --component rustfmt
+          rustup target add wasm32-unknown-unknown --toolchain "$PROVIDER_RUST_TOOLCHAIN"
+          cargo +"$PROVIDER_RUST_TOOLCHAIN" install wasm-tools \
+            --version "$WASM_TOOLS_VERSION" --locked
+          cargo +"$PROVIDER_RUST_TOOLCHAIN" install cargo-deny \
+            --version "$CARGO_DENY_VERSION" --locked
+          cargo +"$PROVIDER_RUST_TOOLCHAIN" install dekopon-run \
+            --version "$DEKOPON_RUN_VERSION" --locked
+      - name: Run complete source, component, host, policy, and measurement gates
+        run: ./scripts/validate.sh
+      - name: Check out independent tagged rebuild
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.ref }}
+          path: rebuild
+          persist-credentials: false
+      - name: Rebuild independently and require byte identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd rebuild && ./scripts/build-component.sh)
+          cmp python-provider.wasm rebuild/python-provider.wasm
+          cmp python-provider.wasm.sha256 rebuild/python-provider.wasm.sha256
+          sha256sum --check --strict python-provider.wasm.sha256
+      - name: Upload exact technical release assets
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-component
+          path: |
+            python-provider.wasm
+            python-provider.wasm.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  attest:
+    name: attest exact component
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download exact component
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-component
+          path: dist
+      - name: Verify two files and checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(find dist -maxdepth 1 -type f | wc -l)" -eq 2
+          (cd dist && sha256sum --check --strict python-provider.wasm.sha256)
+      - name: Attest component provenance
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-path: dist/python-provider.wasm
+
+  draft:
+    name: create run-owned draft release
+    needs: [build, attest]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    outputs:
+      release_id: ${{ steps.create.outputs.release_id }}
+      marker: ${{ steps.create.outputs.marker }}
+    env:
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Download exact component
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-component
+          path: dist
+      - name: Refuse an existing release and create a marked draft
+        id: create
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd dist && sha256sum --check --strict python-provider.wasm.sha256)
+          if gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "error: release already exists for immutable tag $GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+          marker="provider-python-run:$GITHUB_RUN_ID:$GITHUB_RUN_ATTEMPT"
+          gh release create "$GITHUB_REF_NAME" --verify-tag --draft \
+            --title "$GITHUB_REF_NAME" \
+            --notes "$marker" \
+            dist/python-provider.wasm dist/python-provider.wasm.sha256
+          release_id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" --jq .id)
+          test -n "$release_id"
+          echo "release_id=$release_id" >>"$GITHUB_OUTPUT"
+          echo "marker=$marker" >>"$GITHUB_OUTPUT"
+      - name: Redownload and verify exact draft assets by release ID
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ steps.create.outputs.release_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" >"$RUNNER_TEMP/release.json"
+          test "$(jq -r .draft "$RUNNER_TEMP/release.json")" = true
+          assets=$(jq -r '[.assets[].name] | sort | join("\n")' "$RUNNER_TEMP/release.json")
+          test "$assets" = $'python-provider.wasm\npython-provider.wasm.sha256'
+          mkdir "$RUNNER_TEMP/redownload"
+          for name in python-provider.wasm python-provider.wasm.sha256; do
+            asset_id=$(jq -r --arg name "$name" '.assets[] | select(.name == $name) | .id' \
+              "$RUNNER_TEMP/release.json")
+            gh api -H 'Accept: application/octet-stream' \
+              "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id" \
+              >"$RUNNER_TEMP/redownload/$name"
+          done
+          (cd "$RUNNER_TEMP/redownload" && sha256sum --check --strict python-provider.wasm.sha256)
+          cmp dist/python-provider.wasm "$RUNNER_TEMP/redownload/python-provider.wasm"
+          cmp dist/python-provider.wasm.sha256 "$RUNNER_TEMP/redownload/python-provider.wasm.sha256"
+
+  ghcr:
+    name: publish identical public OCI artifact
+    needs: [build, draft]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      manifest_digest: ${{ steps.publish.outputs.manifest_digest }}
+    steps:
+      - name: Download exact component
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-component
+          path: dist
+      - name: Verify exact component
+        run: (cd dist && sha256sum --check --strict python-provider.wasm.sha256)
+      - name: Authenticate to GHCR with the job token
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install pinned ORAS from verified archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="oras_${ORAS_VERSION}_linux_amd64.tar.gz"
+          curl --fail --silent --show-error --location \
+            "https://github.com/oras-project/oras/releases/download/v${ORAS_VERSION}/${archive}" \
+            --output "$RUNNER_TEMP/$archive"
+          echo "$ORAS_LINUX_AMD64_SHA256  $RUNNER_TEMP/$archive" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" oras
+          install -m 0755 "$RUNNER_TEMP/oras" "$RUNNER_TEMP/oras-bin"
+      - name: Push one identical Wasm layer with no latest tag
+        id: publish
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$VERSION" = 0.1.0
+          ref="$OCI_REPOSITORY:$VERSION"
+          "$RUNNER_TEMP/oras-bin" push "$ref" \
+            --artifact-type application/vnd.dekopon.provider.v1+wasm \
+            --annotation "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            dist/python-provider.wasm:application/wasm
+          "$RUNNER_TEMP/oras-bin" manifest fetch "$ref" >"$RUNNER_TEMP/manifest.json"
+          expected="sha256:$(awk '{print $1}' dist/python-provider.wasm.sha256)"
+          jq -e --arg expected "$expected" '
+            .artifactType == "application/vnd.dekopon.provider.v1+wasm" and
+            (.layers | length) == 1 and
+            .layers[0].mediaType == "application/wasm" and
+            .layers[0].digest == $expected and
+            (.config.size == 2 or .config.size == 0)
+          ' "$RUNNER_TEMP/manifest.json" >/dev/null
+          digest=$("$RUNNER_TEMP/oras-bin" manifest fetch --descriptor "$ref" | jq -er .digest)
+          echo "manifest_digest=$digest" >>"$GITHUB_OUTPUT"
+      - name: Set and read back public visibility
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --method PUT \
+            "/orgs/dekopon-agents/packages/container/provider-python/visibility" \
+            -f visibility=public >/dev/null
+          test "$(gh api '/orgs/dekopon-agents/packages/container/provider-python' --jq .visibility)" = public
+      - name: Verify anonymous manifest, blob, and byte identity
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker logout ghcr.io
+          ref="$OCI_REPOSITORY:$VERSION"
+          "$RUNNER_TEMP/oras-bin" manifest fetch "$ref" >"$RUNNER_TEMP/anonymous-manifest.json"
+          mkdir "$RUNNER_TEMP/anonymous-pull"
+          "$RUNNER_TEMP/oras-bin" pull "$ref" --output "$RUNNER_TEMP/anonymous-pull"
+          cmp dist/python-provider.wasm "$RUNNER_TEMP/anonymous-pull/python-provider.wasm"
+          expected="sha256:$(awk '{print $1}' dist/python-provider.wasm.sha256)"
+          test "$(jq -r '.layers[0].digest' "$RUNNER_TEMP/anonymous-manifest.json")" = "$expected"
+
+  finalize:
+    name: finalize exact draft by ID
+    needs: [build, draft, ghcr]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Verify marked draft and finalize by release ID
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ needs.draft.outputs.release_id }}
+          MARKER: ${{ needs.draft.outputs.marker }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" >"$RUNNER_TEMP/draft.json"
+          test "$(jq -r .draft "$RUNNER_TEMP/draft.json")" = true
+          test "$(jq -r .tag_name "$RUNNER_TEMP/draft.json")" = v0.1.0
+          test "$(jq -r .body "$RUNNER_TEMP/draft.json")" = "$MARKER"
+          assets=$(jq -r '[.assets[].name] | sort | join("\n")' "$RUNNER_TEMP/draft.json")
+          test "$assets" = $'python-provider.wasm\npython-provider.wasm.sha256'
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" \
+            -F draft=false >"$RUNNER_TEMP/published.json"
+          test "$(jq -r .draft "$RUNNER_TEMP/published.json")" = false
+
+  post_release:
+    name: anonymous post-release verification
+    needs: [build, finalize, ghcr]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Install pinned ORAS
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="oras_${ORAS_VERSION}_linux_amd64.tar.gz"
+          curl --fail --silent --show-error --location \
+            "https://github.com/oras-project/oras/releases/download/v${ORAS_VERSION}/${archive}" \
+            --output "$RUNNER_TEMP/$archive"
+          echo "$ORAS_LINUX_AMD64_SHA256  $RUNNER_TEMP/$archive" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" oras
+      - name: Pull public release and OCI bytes anonymously
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir release oci
+          curl --fail --silent --show-error --location \
+            "https://github.com/$GITHUB_REPOSITORY/releases/download/v$VERSION/python-provider.wasm" \
+            -o release/python-provider.wasm
+          curl --fail --silent --show-error --location \
+            "https://github.com/$GITHUB_REPOSITORY/releases/download/v$VERSION/python-provider.wasm.sha256" \
+            -o release/python-provider.wasm.sha256
+          (cd release && sha256sum --check --strict python-provider.wasm.sha256)
+          "$RUNNER_TEMP/oras" pull "$OCI_REPOSITORY:$VERSION" --output oci
+          cmp release/python-provider.wasm oci/python-provider.wasm
+          test "sha256:$(sha256sum release/python-provider.wasm | awk '{print $1}')" != ""
+
+  cleanup_failed_draft:
+    name: remove only this run's failed draft
+    if: failure() && needs.draft.outputs.release_id != ''
+    needs: [draft, ghcr, finalize]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Verify marker and delete only the run-owned draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ needs.draft.outputs.release_id }}
+          MARKER: ${{ needs.draft.outputs.marker }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" >"$RUNNER_TEMP/release.json" 2>/dev/null; then
+            exit 0
+          fi
+          test "$(jq -r .draft "$RUNNER_TEMP/release.json")" = true || exit 0
+          test "$(jq -r .body "$RUNNER_TEMP/release.json")" = "$MARKER" || exit 0
+          gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID"
+          echo "OCI cleanup, if needed, is keyed by manifest digest: ${{ needs.ghcr.outputs.manifest_digest }}"

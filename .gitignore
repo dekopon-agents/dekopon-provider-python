@@ -1,0 +1,6 @@
+/target/
+/python-provider.wasm
+/python-provider.wasm.sha256
+*.wasm
+*.wasm.sha256
+.DS_Store

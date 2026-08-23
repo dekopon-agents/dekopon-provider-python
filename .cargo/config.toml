@@ -1,0 +1,6 @@
+[target.wasm32-unknown-unknown]
+rustflags = [
+  "--cfg",
+  "getrandom_backend=\"custom\"",
+  "--check-cfg=cfg(getrandom_backend, values(\"custom\"))",
+]

@@ -1,0 +1,49 @@
+[workspace]
+
+[package]
+name = "dekopon-python-provider"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.93.0"
+license = "MIT OR Apache-2.0"
+description = "A constrained, import-free RustPython evaluator for Dekopon"
+repository = "https://github.com/dekopon-agents/dekopon-provider-python"
+publish = false
+build = "build.rs"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+dekopon-provider-sdk = "=0.11.0"
+getrandom = "=0.3.4"
+num-traits = "=0.2.19"
+rustpython-common = "=0.5.0"
+rustpython-pylib = { version = "=0.5.0", default-features = false, features = ["freeze-stdlib"] }
+rustpython-stdlib = { version = "=0.5.0", default-features = false, features = ["compiler"] }
+rustpython-vm = { version = "=0.5.0", default-features = false, features = ["compiler", "gc", "encodings", "freeze-stdlib"] }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.151"
+yaml-rust2 = { version = "=0.12.0", default-features = false }
+
+[dev-dependencies]
+dekopon-provider-sdk-testkit = "=0.11.0"
+tokio = { version = "=1.49.0", default-features = false, features = ["macros", "rt-multi-thread"] }
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.rustdoc]
+broken_intra_doc_links = "deny"
+
+[lints.clippy]
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+
+[profile.release]
+codegen-units = 1
+lto = "fat"
+opt-level = 3
+panic = "abort"
+strip = "symbols"

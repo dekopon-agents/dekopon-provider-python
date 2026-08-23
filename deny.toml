@@ -1,0 +1,78 @@
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+yanked = "deny"
+ignore = [
+  { id = "RUSTSEC-2024-0436", reason = "paste 1.0.15 is fixed in the exact RustPython 0.5.0 graph; no maintained compatible release exists, publication remains held" },
+  { id = "RUSTSEC-2025-0075", reason = "exact RustPython 0.5.0 rust-unic closure; unmaintained, no safe compatible upgrade" },
+  { id = "RUSTSEC-2025-0078", reason = "exact RustPython 0.5.0 rust-unic closure; unmaintained, no safe compatible upgrade" },
+  { id = "RUSTSEC-2025-0079", reason = "exact RustPython 0.5.0 rust-unic closure; unmaintained, no safe compatible upgrade" },
+  { id = "RUSTSEC-2025-0080", reason = "exact RustPython 0.5.0 rust-unic closure; unmaintained, no safe compatible upgrade" },
+  { id = "RUSTSEC-2025-0081", reason = "exact RustPython 0.5.0 rust-unic closure; unmaintained, no safe compatible upgrade" },
+  { id = "RUSTSEC-2025-0082", reason = "exact RustPython 0.5.0 rust-unic closure; unmaintained, no safe compatible upgrade" },
+  { id = "RUSTSEC-2025-0083", reason = "exact RustPython 0.5.0 rust-unic closure; unmaintained, no safe compatible upgrade" },
+  { id = "RUSTSEC-2025-0094", reason = "exact RustPython 0.5.0 rust-unic closure; unmaintained, no safe compatible upgrade" },
+  { id = "RUSTSEC-2025-0098", reason = "exact RustPython 0.5.0 rust-unic closure; unmaintained, no safe compatible upgrade" },
+  { id = "RUSTSEC-2025-0100", reason = "exact RustPython 0.5.0 rust-unic closure; unmaintained, no safe compatible upgrade" },
+  { id = "RUSTSEC-2025-0102", reason = "exact RustPython 0.5.0 rust-unic closure; unmaintained, no safe compatible upgrade" },
+]
+
+[licenses]
+version = 2
+confidence-threshold = 0.93
+allow = [
+  "0BSD",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-2-Clause-Views",
+  "BSD-3-Clause",
+  "BSL-1.0",
+  "CC0-1.0",
+  "ISC",
+  "MIT",
+  "MIT-0",
+  "PSF-2.0",
+  "Python-2.0.1",
+  "Unicode-3.0",
+  "Unicode-DFS-2016",
+  "Unlicense",
+  "Zlib",
+  "bzip2-1.0.6",
+]
+exceptions = [
+  { allow = ["LGPL-3.0-only"], crate = "malachite-base@0.9.2" },
+  { allow = ["LGPL-3.0-only"], crate = "malachite-bigint@0.9.2" },
+  { allow = ["LGPL-3.0-only"], crate = "malachite-nz@0.9.2" },
+  { allow = ["LGPL-3.0-only"], crate = "malachite-q@0.9.2" },
+  { allow = ["LGPL-2.1-or-later"], crate = "r-efi@5.3.0" },
+  { allow = ["LGPL-2.1-or-later"], crate = "r-efi@6.0.0" },
+]
+
+[[licenses.clarify]]
+name = "rustpython-doc"
+version = "0.5.0"
+expression = "Python-2.0.1"
+license-files = [{ path = "LICENSE", hash = 0x89e6df3c }]
+
+[[licenses.clarify]]
+name = "rustpython-pylib"
+version = "0.5.0"
+expression = "Python-2.0.1"
+license-files = [{ path = "Lib/PSF-LICENSE", hash = 0xe5f4697b }]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+highlight = "all"
+deny = []
+skip = []
+skip-tree = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

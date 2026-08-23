@@ -1,0 +1,11 @@
+pub(crate) const SCRIPT_BYTES: usize = 65_536;
+pub(crate) const STDOUT_BYTES: usize = 65_536;
+pub(crate) const YAML_BYTES: usize = 65_536;
+pub(crate) const RESULT_BYTES: usize = 131_072;
+pub(crate) const DIAGNOSTIC_BYTES: usize = 2_048;
+pub(crate) const RESPONSE_BYTES: usize = 786_432;
+pub(crate) const MAX_DEPTH: usize = 32;
+pub(crate) const MAX_NODES: usize = 10_000;
+pub(crate) const PYTHON_RECURSION: usize = 200;
+pub(crate) const MAX_SAFE_INTEGER: i64 = 9_007_199_254_740_991;
+pub(crate) const HASH_SEED: u32 = 0xdec0_50a5;
