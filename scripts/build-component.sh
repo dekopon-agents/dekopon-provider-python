@@ -43,11 +43,13 @@ encoded_rustflags=$(printf '%s\x1f' "${rustflags[@]}")
 encoded_rustflags=${encoded_rustflags%$'\x1f'}
 
 CARGO_ENCODED_RUSTFLAGS="$encoded_rustflags" \
-  cargo +"$required_rust" build \
+  cargo +"$required_rust" rustc \
     --locked \
     --manifest-path "$root/Cargo.toml" \
     --target wasm32-unknown-unknown \
-    --release
+    --release \
+    -- \
+    -C metadata=dekopon-python-provider-0.1.0-repro-v1
 
 wasm-tools validate "$core"
 "$root/scripts/assert-zero-core-imports.sh" "$core"
