@@ -374,6 +374,18 @@ mod tests {
         source.push_str("null");
         assert!(load_yaml(&source).expect_err("too deep").contains("depth"));
 
+        let too_many_nodes = format!("[{}]", "null,".repeat(crate::limits::MAX_NODES));
+        assert!(
+            load_yaml(&too_many_nodes)
+                .expect_err("too many nodes")
+                .contains("node count")
+        );
+        assert!(
+            load_yaml(&"x".repeat(YAML_BYTES + 1))
+                .expect_err("oversized input")
+                .contains("input")
+        );
+
         let oversized = json!({"text": "x".repeat(YAML_BYTES)});
         assert!(
             dump_yaml(&oversized)
