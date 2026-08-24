@@ -45,8 +45,8 @@ verify it with pinned `cargo-cyclonedx` 0.5.9:
 ```
 
 See [RELINKING.md](RELINKING.md) for recipient modification, rebuild, componentization, and
-installation instructions. Generated archives, SBOMs, vendor trees, checksums, staging trees, and
-Wasm remain ignored and absent from Git.
+installation instructions. Generated archives, SBOMs, vendor trees, checksums, temporary build
+trees, and Wasm remain ignored and absent from Git.
 
 ## Exact CLI use
 

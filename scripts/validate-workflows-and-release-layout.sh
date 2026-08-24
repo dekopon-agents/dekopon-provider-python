@@ -30,8 +30,6 @@ for required in \
   'PROVIDER_PYTHON_RELEASE_APPROVED' \
   'ghcr.io/dekopon-agents/provider-python' \
   'ghcr.io/dekopon-agents/provider-python-source' \
-  'OCI_STAGING_REPOSITORY' \
-  'SOURCE_OCI_STAGING_REPOSITORY' \
   'application/vnd.dekopon.provider.v1+wasm' \
   'application/vnd.dekopon.provider.source.v1' \
   'python-provider.wasm:application/wasm' \
@@ -39,20 +37,20 @@ for required in \
   'org.dekopon.corresponding-source.digest' \
   'org.dekopon.corresponding-source.archive' \
   'org.opencontainers.image.licenses=LGPL-3.0-only' \
+  'org.dekopon.release.run=$run' \
   'test-source-bundle-reproducibility.sh' \
   'test-source-bundle-relink.sh' \
   'verify-release-assets.sh' \
   'verify-oci-manifest.py' \
   'docker logout ghcr.io' \
   'env -u GH_TOKEN -u GITHUB_TOKEN' \
-  'manifest delete --force' \
-  'provider_initial_visibility' \
-  'source_initial_visibility' \
-  'ensure_existing_staging_private' \
-  'cleanup_owned_staging_ref' \
-  'record_owned_manifest "$OCI_STAGING_REPOSITORY" "$provider_stage"' \
+  'provider-python-initial-visibility' \
+  'provider-python-source-initial-visibility' \
+  'record_owned_final_manifest' \
+  'assert_manifest_has_only_final_tag' \
   'remove only this run' \
-  'always() && (failure() || cancelled())'; do
+  "needs.finalize.result != 'success'" \
+  'preserving immutable finalized release after read-only failure'; do
   grep -Fq "$required" "$release" || {
     echo "error: release workflow lacks $required" >&2
     exit 1
@@ -62,28 +60,93 @@ done
   echo 'error: both OCI manifests must carry the exact accepted SPDX license annotation' >&2
   exit 1
 }
+[[ "$(grep -Fc 'org.dekopon.release.run=$run' "$release")" -eq 2 ]] || {
+  echo 'error: both and only the two final OCI manifests must carry the unique run annotation' >&2
+  exit 1
+}
+[[ "$(grep -Fc 'manifest delete --force' "$release")" -eq 1 ]] || {
+  echo 'error: cleanup must have one ownership-gated final-manifest delete path' >&2
+  exit 1
+}
+actual_repositories=$(grep -Eo 'ghcr[.]io/dekopon-agents/[a-z0-9-]+' "$release" | LC_ALL=C sort -u)
+expected_repositories=$(printf '%s\n' \
+  ghcr.io/dekopon-agents/provider-python \
+  ghcr.io/dekopon-agents/provider-python-source | LC_ALL=C sort)
+[[ "$actual_repositories" == "$expected_repositories" ]] || {
+  echo 'error: release workflow refers to an unauthorized package repository' >&2
+  exit 1
+}
+if grep -Eq 'oras(-bin)?"?[[:space:]]+cp|"\$RUNNER_TEMP/oras(-bin)?"[[:space:]]+cp' "$release"; then
+  echo 'error: direct-final publication must not create a second tag for a shared digest' >&2
+  exit 1
+fi
 grep -Fq './scripts/prepare-release-assets.sh 0.1.0 dist' \
   "$root/.github/workflows/ci.yml" || {
   echo 'error: regular CI does not prepare the exact release asset set' >&2
   exit 1
 }
+
 python3 - "$release" <<'PY'
-import pathlib, sys
+import pathlib
+import sys
+
 text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
-markers = [
-    "# Corresponding source is the first final effect",
-    "/provider-python-source/visibility",
-    '>"$RUNNER_TEMP/anonymous-source-before-provider.json"',
-    '"$OCI_STAGING_REPOSITORY@$PROVIDER_DIGEST" "$provider_ref"',
-    "/provider-python/visibility",
+transactions = [
+    [
+        "inspect_package provider-python provider_initial_visibility",
+        "inspect_package provider-python-source source_initial_visibility",
+        'gh release create "$GITHUB_REF_NAME"',
+    ],
+    [
+        "# Prove both immutable version tags absent before the first package mutation.",
+        'assert_absent "$provider_ref" provider-version',
+        'assert_absent "$source_ref" source-version',
+        'prepare_private_package provider-python-source "$SOURCE_INITIAL_VISIBILITY"',
+        '"$RUNNER_TEMP/oras-bin" push "$source_ref"',
+        "set_package_visibility provider-python-source public",
+        '>"$RUNNER_TEMP/anonymous-source-before-provider.json"',
+        'assert_absent "$provider_ref" provider-before-push',
+        'prepare_private_package provider-python "$PROVIDER_INITIAL_VISIBILITY"',
+        '"$RUNNER_TEMP/oras-bin" push "$provider_ref"',
+        "set_package_visibility provider-python public",
+        '>"$RUNNER_TEMP/anonymous-provider.json"',
+        "# This PATCH is the transaction's final mutation.",
+        'gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID"',
+    ],
+    [
+        "record_owned_final_manifest \"$OCI_REPOSITORY\"",
+        "record_owned_final_manifest \"$SOURCE_OCI_REPOSITORY\"",
+        "delete_owned_manifest provider-python \"$OCI_REPOSITORY\"",
+        'restore_visibility provider-python "$PROVIDER_INITIAL_VISIBILITY"',
+        "delete_owned_manifest provider-python-source \"$SOURCE_OCI_REPOSITORY\"",
+        'restore_visibility provider-python-source "$SOURCE_INITIAL_VISIBILITY"',
+        'if [[ "$release_owned_draft" == true ]]',
+    ],
 ]
-positions = []
-for marker in markers:
-    if text.count(marker) != 1:
-        raise SystemExit(f"error: release transaction marker drifted: {marker}")
-    positions.append(text.index(marker))
-if positions != sorted(positions):
-    raise SystemExit("error: provider publication can precede anonymous corresponding-source verification")
+for markers in transactions:
+    positions = []
+    for marker in markers:
+        count = text.count(marker)
+        if count != 1:
+            raise SystemExit(
+                f"error: release transaction marker cardinality drifted ({count}): {marker}"
+            )
+        positions.append(text.index(marker))
+    if positions != sorted(positions):
+        raise SystemExit(f"error: release transaction order drifted: {markers}")
+
+published_guard = "preserving immutable finalized release after read-only failure"
+first_final_resolution = 'record_owned_final_manifest "$OCI_REPOSITORY"'
+if text.index(published_guard) > text.index(first_final_resolution):
+    raise SystemExit("error: cleanup can mutate a finalized release")
+if ".draft == true" not in text[text.index(published_guard):text.index(first_final_resolution)]:
+    raise SystemExit("error: cleanup does not constrain release deletion to a draft")
+cleanup_draft_guard = text.index('if [[ "$release_owned_draft" == true ]]')
+cleanup_release_delete = text.rindex(
+    'gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/$release_id"'
+)
+if cleanup_release_delete < cleanup_draft_guard:
+    raise SystemExit("error: cleanup can delete a release without the owned-draft guard")
 PY
 
 asset_count=$(release_asset_names 0.1.0 | wc -l | tr -d ' ')

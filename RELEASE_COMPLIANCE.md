@@ -40,10 +40,11 @@ mechanical interlock; it is not a request to repeat the policy decision.
   of every source file, and a reproducible CycloneDX 1.5 JSON SBOM made by exactly
   `cargo-cyclonedx` 0.5.9 with `SOURCE_DATE_EPOCH=0`.
 
-No vendor tree, source archive, SBOM, checksum, staging tree, or binary is committed. CI unpacks the
-archive in a new temporary directory, validates the complete vendored closure, applies a harmless
-change to `malachite-base 0.9.2`, refreshes Cargo's vendored file checksum, rebuilds from an empty
-canonical target with offline source replacement, componentizes with `wasm-tools 1.236.1`, and
+No vendor tree, source archive, SBOM, checksum, temporary build tree, or binary is committed. CI
+unpacks the archive in a new temporary directory, validates the complete vendored closure, applies
+a harmless change to `malachite-base 0.9.2`, refreshes Cargo's vendored file checksum, rebuilds
+from an empty canonical target with offline source replacement, componentizes with
+`wasm-tools 1.236.1`, and
 proves a valid import-free component results. `RELINKING.md` gives recipients the same commands and
 installation information without a proprietary tool or key.
 
@@ -97,23 +98,27 @@ The tag workflow will proceed only when all of these hold:
 - the full source/security/resource/host suite, cargo-deny policy, notice/license hashes,
   deterministic component rebuild, deterministic source-bundle rebuild, and modified-Malachite
   offline relink test pass with pinned tools;
-- no GitHub Release or final provider/source OCI version already exists;
-- a run-marked draft contains the exact 14 re-downloaded assets;
-- run-owned private staging manifests for source and provider have exact layer counts, media types,
-  byte digests, source links, immutable version/revision, and run annotations;
-- the source version is copied by digest, made public, and anonymously verified before the provider
-  version is copied or exposed; then both linked bytes/digests are pulled anonymously and
-  recombined successfully;
-- the GitHub Release is then published and every release asset is downloaded anonymously and
-  compared with the already-verified bytes.
+- no GitHub Release or final provider/source OCI version already exists, and the prior visibility
+  of each authorized package is recorded in the run-marked draft before package mutation;
+- the draft contains the exact 14 re-downloaded assets;
+- the source manifest is pushed directly to its sole final `0.1.0` tag with exact layer counts,
+  media types, byte digests, source/license metadata, immutable version/revision, and the unique run
+  annotation; it is made public and every source/compliance byte is verified anonymously;
+- only after that source verification is the one-layer provider manifest pushed directly to its
+  sole final `0.1.0` tag, linked to the known source digest, made public, and anonymously pulled;
+  both linked artifact byte sets are then recombined and checked successfully;
+- the run-owned GitHub Release remains a draft throughout those checks and is finalized only after
+  both final OCI manifests and all anonymous source/provider bytes have passed. Subsequent
+  anonymous release checks are read-only.
 
-A failure or cancellation before successful post-publication verification invokes run-owned
-cleanup. Cleanup first checks the deterministic release marker and manifest run annotations /
-digests, then removes only this run's draft/published release and provider/source staging/final
-manifests and restores prior package visibility when appropriate. In-job traps and the cleanup job
-resolve known run-specific staging tags when digest outputs were never captured, verify ownership,
-and delete only the resolved digest. Binary manifests are removed before source/release materials,
-so interruption cannot create a binary without corresponding source or delete unrelated state.
+A failure or cancellation before release finalization invokes run-owned cleanup. Cleanup resolves
+only the two deterministic final refs and their known digests, verifies this run's annotation and
+exact source/license/version metadata, and refuses to delete a manifest carrying any additional
+tag. It deletes the provider before the source, restores each package's recorded prior visibility
+where applicable, and deletes only this run's marked draft. It never deletes another release or
+unrelated package state. The workflow creates no second tag for either manifest digest. Once the
+marked release is no longer a draft, cleanup preserves the immutable finalized release and both
+artifacts; a failing post-finalization read-only check is reported without destructive rollback.
 
 Do not create the remote, set the variable, tag, push, package, or release until the owner chooses
 to perform the remaining mechanical publication steps. The annotated `v0.1.0` tag must be contained
