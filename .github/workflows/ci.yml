@@ -57,7 +57,7 @@ jobs:
             "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${archive}" \
             --output "$RUNNER_TEMP/$archive"
           echo "$ACTIONLINT_LINUX_AMD64_SHA256  $RUNNER_TEMP/$archive" | \
-            sha256sum --check --strict
+            sha256sum --check --strict -
           tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" actionlint
           install -m 0755 "$RUNNER_TEMP/actionlint" "$RUNNER_TEMP/actionlint-bin"
       - name: Format, lint, test, MSRV, target, lock, licenses, and notices
@@ -97,11 +97,13 @@ jobs:
             --version "$WASM_TOOLS_VERSION" --locked
           cargo +"$PROVIDER_RUST_TOOLCHAIN" install cargo-cyclonedx \
             --version "$CARGO_CYCLONEDX_VERSION" --locked
-      - name: Reproduce source bundle and relink modified Malachite offline
+      - name: Prepare exact assets, reproduce source bundle, and relink modified Malachite offline
         shell: bash
         run: |
           set -euo pipefail
-          ./scripts/build-source-bundle.sh dist
+          ./scripts/build-component.sh
+          ./scripts/prepare-release-assets.sh 0.1.0 dist
+          ./scripts/verify-release-assets.sh dist 0.1.0
           ./scripts/test-source-bundle-reproducibility.sh dist
           ./scripts/test-source-bundle-relink.sh \
             dist/dekopon-python-provider-0.1.0-relink-source.tar.gz \

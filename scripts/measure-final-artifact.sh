@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
+# shellcheck source=lib-sha256.sh
+# Resolved from this script's absolute repository root.
+# shellcheck disable=SC1091
+source "$root/scripts/lib-sha256.sh"
 component=${1:-"$root/python-provider.wasm"}
 raw="$root/target/wasm32-unknown-unknown/release/dekopon_python_provider.wasm"
 cache="$root/target/dekopon-run-measure-cache"
 mkdir -p "$cache"
 
 bytes=$(wc -c <"$component" | tr -d ' ')
-sha=$(sha256sum "$component" | awk '{print $1}')
+sha=$(sha256sum_digest "$component")
 raw_bytes=$(wc -c <"$raw" | tr -d ' ')
 
 # Pin a measured normal startup bracket for this exact build.

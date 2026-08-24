@@ -10,7 +10,34 @@ script = r'''
 import json
 import re
 import yaml
-supported = [json.loads('{"x": 1}')["x"], re.search(r"b+", "abbc").group(0), yaml.safe_load("x: 2")["x"]]
+from json import loads
+from re import search
+from yaml import safe_load
+supported = [
+    loads('{"x": 1}')["x"],
+    search(r"b+", "abbc").group(0),
+    safe_load("x: 2")["x"],
+]
+private_from_denied = []
+try:
+    from json import decoder
+except ImportError:
+    private_from_denied.append(True)
+else:
+    private_from_denied.append(False)
+try:
+    from re import _parser
+except ImportError:
+    private_from_denied.append(True)
+else:
+    private_from_denied.append(False)
+for name, fromlist in (("json", ("decoder",)), ("re", ("_parser",))):
+    try:
+        __import__(name, fromlist=fromlist)
+    except ImportError:
+        private_from_denied.append(True)
+    else:
+        private_from_denied.append(False)
 denied = {}
 for name in ("sys", "os", "pathlib", "time", "random", "secrets", "socket", "ssl", "sqlite3", "subprocess", "threading", "ctypes", "tkinter", "webbrowser"):
     try:
@@ -83,6 +110,7 @@ else:
     recovery_denied.append(not recovered)
 result = {
     "supported": supported,
+    "privateFromDenied": private_from_denied,
     "denied": denied,
     "builtinsDenied": builtins_denied,
     "recoveryDenied": recovery_denied,
@@ -94,6 +122,7 @@ output=$(invoke --input-file "$input")
 jq -e '
   .output.ok == true and
   .output.result.supported == [1, "bb", 2] and
+  (.output.result.privateFromDenied == [true, true, true, true]) and
   ([.output.result.denied[]] | all) and
   (.output.result.builtinsDenied | all) and
   (.output.result.recoveryDenied | all)

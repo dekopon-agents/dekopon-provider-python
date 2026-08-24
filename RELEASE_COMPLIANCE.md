@@ -79,9 +79,11 @@ The host-consumable artifact remains exactly one application layer:
 - exactly one `application/wasm` layer, `python-provider.wasm`.
 
 It has immutable annotations linking the release source archive and
-`ghcr.io/dekopon-agents/provider-python-source:0.1.0`, including the source manifest digest. The
-separate public source artifact carries every release asset except the Wasm itself, including the
-Wasm checksum that binds the two artifacts. It uses artifact type
+`ghcr.io/dekopon-agents/provider-python-source:0.1.0`, including the source manifest digest. Both
+OCI manifests carry the exact accepted `org.opencontainers.image.licenses=LGPL-3.0-only`
+annotation; the notices and SBOM provide the complete mixed-license inventory. The separate public
+source artifact carries every release asset except the Wasm itself, including the Wasm checksum
+that binds the two artifacts. It uses artifact type
 `application/vnd.dekopon.provider.source.v1` and exact per-file media types. Neither repository
 publishes `latest` or another mutable alias.
 
@@ -99,16 +101,19 @@ The tag workflow will proceed only when all of these hold:
 - a run-marked draft contains the exact 14 re-downloaded assets;
 - run-owned private staging manifests for source and provider have exact layer counts, media types,
   byte digests, source links, immutable version/revision, and run annotations;
-- both version manifests are copied by digest, packages are public, credentials are removed, and
-  provider and source bytes/digests are pulled anonymously and recombined successfully;
+- the source version is copied by digest, made public, and anonymously verified before the provider
+  version is copied or exposed; then both linked bytes/digests are pulled anonymously and
+  recombined successfully;
 - the GitHub Release is then published and every release asset is downloaded anonymously and
   compared with the already-verified bytes.
 
-A failure before successful post-publication verification invokes run-owned cleanup. Cleanup first
-checks the release marker and both manifest run annotations/digests, then removes only this run's
-draft/published release and provider/source staging/final manifests and restores prior package
-visibility when appropriate. In-job error traps cover failures before job outputs exist. Thus a run
-cannot leave an orphaned public Wasm or source artifact after a failed compliance transaction.
+A failure or cancellation before successful post-publication verification invokes run-owned
+cleanup. Cleanup first checks the deterministic release marker and manifest run annotations /
+digests, then removes only this run's draft/published release and provider/source staging/final
+manifests and restores prior package visibility when appropriate. In-job traps and the cleanup job
+resolve known run-specific staging tags when digest outputs were never captured, verify ownership,
+and delete only the resolved digest. Binary manifests are removed before source/release materials,
+so interruption cannot create a binary without corresponding source or delete unrelated state.
 
 Do not create the remote, set the variable, tag, push, package, or release until the owner chooses
 to perform the remaining mechanical publication steps. The annotated `v0.1.0` tag must be contained

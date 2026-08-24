@@ -6,6 +6,9 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # Resolved from this script's absolute repository root.
 # shellcheck disable=SC1091
 source "$root/scripts/lib-release-assets.sh"
+# shellcheck source=lib-sha256.sh
+# shellcheck disable=SC1091
+source "$root/scripts/lib-sha256.sh"
 version=0.1.0
 archive=$(release_source_archive "$version")
 sbom=$(release_sbom "$version")
@@ -28,4 +31,4 @@ if [[ -n "$reference" ]]; then
   done
 fi
 printf 'source archive and SBOM reproduced byte-for-byte: %s\n' \
-  "$(sha256sum "$temporary/a/$archive" | awk '{print $1}')"
+  "$(sha256sum_digest "$temporary/a/$archive")"

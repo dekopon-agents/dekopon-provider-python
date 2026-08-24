@@ -38,6 +38,7 @@ for required in \
   'org.dekopon.corresponding-source.oci' \
   'org.dekopon.corresponding-source.digest' \
   'org.dekopon.corresponding-source.archive' \
+  'org.opencontainers.image.licenses=LGPL-3.0-only' \
   'test-source-bundle-reproducibility.sh' \
   'test-source-bundle-relink.sh' \
   'verify-release-assets.sh' \
@@ -47,13 +48,43 @@ for required in \
   'manifest delete --force' \
   'provider_initial_visibility' \
   'source_initial_visibility' \
+  'ensure_existing_staging_private' \
+  'cleanup_owned_staging_ref' \
+  'record_owned_manifest "$OCI_STAGING_REPOSITORY" "$provider_stage"' \
   'remove only this run' \
-  'always() && failure()'; do
+  'always() && (failure() || cancelled())'; do
   grep -Fq "$required" "$release" || {
     echo "error: release workflow lacks $required" >&2
     exit 1
   }
 done
+[[ "$(grep -Fc 'org.opencontainers.image.licenses=LGPL-3.0-only' "$release")" -eq 2 ]] || {
+  echo 'error: both OCI manifests must carry the exact accepted SPDX license annotation' >&2
+  exit 1
+}
+grep -Fq './scripts/prepare-release-assets.sh 0.1.0 dist' \
+  "$root/.github/workflows/ci.yml" || {
+  echo 'error: regular CI does not prepare the exact release asset set' >&2
+  exit 1
+}
+python3 - "$release" <<'PY'
+import pathlib, sys
+text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+markers = [
+    "# Corresponding source is the first final effect",
+    "/provider-python-source/visibility",
+    '>"$RUNNER_TEMP/anonymous-source-before-provider.json"',
+    '"$OCI_STAGING_REPOSITORY@$PROVIDER_DIGEST" "$provider_ref"',
+    "/provider-python/visibility",
+]
+positions = []
+for marker in markers:
+    if text.count(marker) != 1:
+        raise SystemExit(f"error: release transaction marker drifted: {marker}")
+    positions.append(text.index(marker))
+if positions != sorted(positions):
+    raise SystemExit("error: provider publication can precede anonymous corresponding-source verification")
+PY
 
 asset_count=$(release_asset_names 0.1.0 | wc -l | tr -d ' ')
 source_count=$(source_oci_asset_names 0.1.0 | wc -l | tr -d ' ')

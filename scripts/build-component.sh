@@ -2,6 +2,10 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -L)
+# shellcheck source=lib-sha256.sh
+# Resolved from this script's absolute repository root.
+# shellcheck disable=SC1091
+source "$root/scripts/lib-sha256.sh"
 component=${1:-"$root/python-provider.wasm"}
 required_rust="1.97.0"
 required_rustc="rustc 1.97.0 (2d8144b78 2026-07-07)"
@@ -71,6 +75,9 @@ if [[ ${DEKOPON_PYTHON_CANONICAL_INNER:-0} != 1 ]]; then
   ln -s "$real_rustup_home" "$canonical/.canonical-rustup-home"
   ln -s "$(command -v cargo)" "$canonical/.canonical-bin/cargo"
   ln -s "$(command -v rustup)" "$canonical/.canonical-bin/rustup"
+  # Darwin installs sha256sum in /sbin, which is deliberately absent from the scrubbed PATH.
+  # Select the caller's checksum implementation explicitly and make only that executable visible.
+  ln -s "$(sha256sum_select)" "$canonical/.canonical-bin/sha256sum"
 
   (
     cd "$canonical"
@@ -89,11 +96,11 @@ if [[ ${DEKOPON_PYTHON_CANONICAL_INNER:-0} != 1 ]]; then
   cp "$canonical/python-provider.wasm" "$component"
   (
     cd "$(dirname "$component")"
-    sha256sum "$(basename "$component")" >"$(basename "$component").sha256"
+    sha256sum_run "$(basename "$component")" >"$(basename "$component").sha256"
   )
   wasm-tools validate "$component"
   "$root/scripts/assert-zero-core-imports.sh" "$component"
-  sha256sum --check --strict "${component}.sha256"
+  sha256sum_check "${component}.sha256"
 
   for forbidden in GH_TOKEN GITHUB_TOKEN GH_PAT OF_PASSWORD UNIFI_SSH_PASSWORD \
     AWS_SECRET_ACCESS_KEY PI_SESSION_ID; do
@@ -155,6 +162,6 @@ wasm-tools validate "$component"
 "$root/scripts/assert-zero-core-imports.sh" "$component"
 (
   cd "$(dirname "$component")"
-  sha256sum "$(basename "$component")" >"$(basename "$component").sha256"
+  sha256sum_run "$(basename "$component")" >"$(basename "$component").sha256"
 )
-sha256sum --check --strict "${component}.sha256"
+sha256sum_check "${component}.sha256"

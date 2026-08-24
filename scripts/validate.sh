@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
+# shellcheck source=lib-sha256.sh
+# Resolved from this script's absolute repository root.
+# shellcheck disable=SC1091
+source "$root/scripts/lib-sha256.sh"
 cd "$root"
 
 test -z "$(git ls-files '*.wasm')"
@@ -36,5 +40,5 @@ fi
 ./scripts/test-immediate-resource-limits.sh python-provider.wasm
 ./scripts/test-broker-testkit.sh python-provider.wasm
 ./scripts/measure-final-artifact.sh python-provider.wasm
-sha256sum --check --strict python-provider.wasm.sha256
+sha256sum_check python-provider.wasm.sha256
 ./scripts/validate-workflows-and-release-layout.sh

@@ -6,6 +6,9 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # Resolved from this script's absolute repository root.
 # shellcheck disable=SC1091
 source "$root/scripts/lib-release-assets.sh"
+# shellcheck source=lib-sha256.sh
+# shellcheck disable=SC1091
+source "$root/scripts/lib-sha256.sh"
 version=${VERSION:-0.1.0}
 archive=${1:-"$root/dist/$(release_source_archive "$version")"}
 sbom=${2:-"$root/dist/$(release_sbom "$version")"}
@@ -15,7 +18,7 @@ for file in "$archive" "$checksum" "$sbom"; do
 done
 archive=$(cd "$(dirname "$archive")" && pwd -P)/$(basename "$archive")
 sbom=$(cd "$(dirname "$sbom")" && pwd -P)/$(basename "$sbom")
-(cd "$(dirname "$archive")" && sha256sum --check --strict "$(basename "$checksum")")
+(cd "$(dirname "$archive")" && sha256sum_check "$(basename "$checksum")")
 
 temporary=$(mktemp -d "${TMPDIR:-/tmp}/dekopon-python-relink.XXXXXX")
 cleanup() {
@@ -64,6 +67,6 @@ grep -Fq 'Compiling malachite-base v0.9.2' "$build_log" || {
 }
 wasm-tools validate "$source_root/python-provider.wasm"
 "$source_root/scripts/assert-zero-core-imports.sh" "$source_root/python-provider.wasm"
-(cd "$source_root" && sha256sum --check --strict python-provider.wasm.sha256)
+(cd "$source_root" && sha256sum_check python-provider.wasm.sha256)
 printf 'offline relink succeeded after modifying %s; component SHA-256 %s\n' \
-  "$modified" "$(sha256sum "$source_root/python-provider.wasm" | awk '{print $1}')"
+  "$modified" "$(sha256sum_digest "$source_root/python-provider.wasm")"

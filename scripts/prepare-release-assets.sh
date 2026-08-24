@@ -6,6 +6,9 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # Resolved from this script's absolute repository root.
 # shellcheck disable=SC1091
 source "$root/scripts/lib-release-assets.sh"
+# shellcheck source=lib-sha256.sh
+# shellcheck disable=SC1091
+source "$root/scripts/lib-sha256.sh"
 version=${1:-0.1.0}
 out=${2:-"$root/dist"}
 release_version_is_valid "$version" || {
@@ -22,7 +25,7 @@ actual_version=$(cargo metadata --locked --no-deps --format-version 1 |
   echo 'error: build python-provider.wasm before preparing release assets' >&2
   exit 1
 }
-(cd "$root" && sha256sum --check --strict python-provider.wasm.sha256)
+(cd "$root" && sha256sum_check python-provider.wasm.sha256)
 
 rm -rf "$out"
 mkdir -p "$out"
@@ -44,7 +47,7 @@ cp \
   : >SHA256SUMS
   while IFS= read -r name; do
     [[ "$name" == SHA256SUMS ]] && continue
-    sha256sum "$name" >>SHA256SUMS
+    sha256sum_run "$name" >>SHA256SUMS
   done < <(release_asset_names "$version")
 )
 "$root/scripts/verify-release-assets.sh" "$out" "$version"

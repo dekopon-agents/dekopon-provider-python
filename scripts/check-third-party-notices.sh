@@ -4,6 +4,10 @@ set -euo pipefail
 lock=${1:-Cargo.lock}
 notices=${2:-THIRD_PARTY_NOTICES.md}
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
+# shellcheck source=lib-sha256.sh
+# Resolved from this script's absolute repository root.
+# shellcheck disable=SC1091
+source "$root/scripts/lib-sha256.sh"
 for file in "$lock" "$notices"; do
   [[ -f "$file" ]] || { echo "error: missing $file" >&2; exit 1; }
 done
@@ -47,8 +51,8 @@ for term in \
 done
 
 echo '20e50fe7aae3e56378ebf0417d9de904f55a0e61e4df315333e632a4d3555d95  LICENSE-LGPL-2.1' |
-  (cd "$root" && sha256sum --check --strict)
+  (cd "$root" && sha256sum_check -)
 echo 'e3a994d82e644b03a792a930f574002658412f62407f5fee083f2555c5f23118  LICENSE-LGPL-3.0' |
-  (cd "$root" && sha256sum --check --strict)
+  (cd "$root" && sha256sum_check -)
 echo '3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986  LICENSE-GPL-3.0' |
-  (cd "$root" && sha256sum --check --strict)
+  (cd "$root" && sha256sum_check -)

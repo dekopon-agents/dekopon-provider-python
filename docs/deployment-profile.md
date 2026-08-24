@@ -73,5 +73,5 @@ not derive a container limit from the 64 MiB store ceiling alone.
 5. keep connection count low enough that concurrent cold compilation cannot OOM the process.
 
 RPi latency and aggregate concurrency are deployment measurements, not inferred from the Mac
-measurement. Publication remains held until those measurements and the LGPL policy decision are
-reviewed by the owner.
+measurement. The owner has accepted the v0.1.0 LGPL distribution decision; RPi measurements do not
+reopen it or hold publication. They remain a separate production-deployment/admission gate.

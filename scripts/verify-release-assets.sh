@@ -6,6 +6,9 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # Resolved from this script's absolute repository root.
 # shellcheck disable=SC1091
 source "$root/scripts/lib-release-assets.sh"
+# shellcheck source=lib-sha256.sh
+# shellcheck disable=SC1091
+source "$root/scripts/lib-sha256.sh"
 directory=${1:-"$root/dist"}
 version=${2:-0.1.0}
 release_version_is_valid "$version" || {
@@ -34,9 +37,9 @@ actual_checksum_names=$(awk 'length($1) == 64 && $2 != "" {print $2}' "$director
 }
 (
   cd "$directory"
-  sha256sum --check --strict python-provider.wasm.sha256
-  sha256sum --check --strict "$archive.sha256"
-  sha256sum --check --strict SHA256SUMS
+  sha256sum_check python-provider.wasm.sha256
+  sha256sum_check "$archive.sha256"
+  sha256sum_check SHA256SUMS
 )
 
 if command -v wasm-tools >/dev/null 2>&1; then
@@ -98,22 +101,25 @@ if not required <= components:
 PY
 
 echo '20e50fe7aae3e56378ebf0417d9de904f55a0e61e4df315333e632a4d3555d95  LICENSE-LGPL-2.1' |
-  (cd "$directory" && sha256sum --check --strict)
+  (cd "$directory" && sha256sum_check -)
 echo 'e3a994d82e644b03a792a930f574002658412f62407f5fee083f2555c5f23118  LICENSE-LGPL-3.0' |
-  (cd "$directory" && sha256sum --check --strict)
+  (cd "$directory" && sha256sum_check -)
 echo '3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986  LICENSE-GPL-3.0' |
-  (cd "$directory" && sha256sum --check --strict)
+  (cd "$directory" && sha256sum_check -)
 for notice in \
   'malachite-base 0.9.2' \
   'malachite-bigint 0.9.2' \
   'malachite-nz 0.9.2' \
   'malachite-q 0.9.2' \
-  'LGPL-3.0-only' \
-  'corresponding source'; do
+  'LGPL-3.0-only'; do
   grep -Fiq "$notice" "$directory/THIRD_PARTY_NOTICES.md" || {
     echo "error: release notice lacks $notice" >&2
     exit 1
   }
 done
+grep -Eiq 'corresponding[- ]source' "$directory/THIRD_PARTY_NOTICES.md" || {
+  echo 'error: release notice lacks corresponding source' >&2
+  exit 1
+}
 printf 'verified %s release assets for v%s\n' \
   "$(release_asset_names "$version" | wc -l | tr -d ' ')" "$version"

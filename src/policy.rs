@@ -23,27 +23,56 @@ const DENIED_MODULES: [&str; 15] = [
 #[rustpython_vm::pymodule(name = "_dekopon_policy")]
 pub(crate) mod policy_module {
     use rustpython_vm::{
-        PyResult, TryFromObject, VirtualMachine, builtins::PyStrRef, function::FuncArgs,
+        AsObject, PyObjectRef, PyResult, TryFromObject, VirtualMachine,
+        builtins::{PyStrRef, PyTupleRef},
+        function::FuncArgs,
     };
+
+    const IMPORT_ARGUMENTS: [&str; 5] = ["name", "globals", "locals", "fromlist", "level"];
+
+    fn import_argument(
+        args: &FuncArgs,
+        index: usize,
+        name: &str,
+        vm: &VirtualMachine,
+    ) -> PyResult<Option<PyObjectRef>> {
+        let positional = args.args.get(index).cloned();
+        let keyword = args.kwargs.get(name).cloned();
+        if positional.is_some() && keyword.is_some() {
+            return Err(vm.new_type_error(format!(
+                "__import__() got multiple values for argument '{name}'"
+            )));
+        }
+        Ok(positional.or(keyword))
+    }
 
     #[pyfunction]
     fn guarded_import(args: FuncArgs, vm: &VirtualMachine) -> PyResult {
-        let name_object = args
-            .args
-            .first()
-            .cloned()
-            .or_else(|| args.kwargs.get("name").cloned())
+        if args.args.len() > IMPORT_ARGUMENTS.len() {
+            return Err(vm.new_type_error(format!(
+                "__import__() takes at most {} arguments ({} given)",
+                IMPORT_ARGUMENTS.len(),
+                args.args.len()
+            )));
+        }
+        if let Some(unexpected) = args
+            .kwargs
+            .keys()
+            .find(|keyword| !IMPORT_ARGUMENTS.contains(&keyword.as_str()))
+        {
+            return Err(vm.new_type_error(format!(
+                "__import__() got an unexpected keyword argument '{unexpected}'"
+            )));
+        }
+
+        let name_object = import_argument(&args, 0, "name", vm)?
             .ok_or_else(|| vm.new_type_error("__import__() missing required argument 'name'"))?;
         let name = PyStrRef::try_from_object(vm, name_object)?;
         let name = name
             .to_str()
             .ok_or_else(|| vm.new_import_error("module name must be UTF-8", name.clone()))?;
 
-        let level = args
-            .args
-            .get(4)
-            .cloned()
-            .or_else(|| args.kwargs.get("level").cloned())
+        let level = import_argument(&args, 4, "level", vm)?
             .map(|value| i32::try_from_object(vm, value))
             .transpose()?
             .unwrap_or(0);
@@ -58,7 +87,48 @@ pub(crate) mod policy_module {
         // installed. Return only an exact public module from the Rust-owned sys module rather than
         // retaining or invoking Python-visible importlib/original-import callables.
         let modules = vm.sys_module.get_attr("modules", vm)?;
-        modules.get_item(name, vm)
+        let module = modules.get_item(name, vm)?;
+
+        // IMPORT_NAME passes a tuple of requested attributes. Permit public values such as
+        // `from json import loads`, but do not let IMPORT_FROM bind a private implementation name,
+        // a star-expanded namespace, or a module object such as json.decoder / re._parser.
+        if let Some(fromlist) = import_argument(&args, 3, "fromlist", vm)?
+            && !vm.is_none(&fromlist)
+        {
+            if !fromlist.class().is(vm.ctx.types.tuple_type) {
+                return Err(vm.new_type_error("__import__() fromlist must be an exact tuple"));
+            }
+            let fromlist = PyTupleRef::try_from_object(vm, fromlist)?;
+            for requested in fromlist.iter() {
+                let requested_object = PyStrRef::try_from_object(vm, requested.clone())?;
+                let requested = requested_object
+                    .to_str()
+                    .ok_or_else(|| {
+                        vm.new_import_error("imported name must be UTF-8", requested_object.clone())
+                    })?
+                    .to_owned();
+                if requested == "*" || requested.starts_with('_') {
+                    return Err(vm.new_import_error(
+                        format!("import of '{name}.{requested}' is not permitted"),
+                        vm.ctx.new_utf8_str(format!("{name}.{requested}")),
+                    ));
+                }
+                let value = module.get_attr(&requested_object, vm).map_err(|_| {
+                    vm.new_import_error(
+                        format!("cannot import name '{requested}' from '{name}'"),
+                        vm.ctx.new_utf8_str(name),
+                    )
+                })?;
+                if value.class().fast_issubclass(vm.ctx.types.module_type) {
+                    return Err(vm.new_import_error(
+                        format!("module-valued import of '{name}.{requested}' is not permitted"),
+                        vm.ctx.new_utf8_str(format!("{name}.{requested}")),
+                    ));
+                }
+            }
+        }
+
+        Ok(module)
     }
 }
 

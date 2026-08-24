@@ -14,6 +14,7 @@ SOURCE_ARCHIVE = "dekopon-python-provider-0.1.0-relink-source.tar.gz"
 SOURCE_REPOSITORY = "ghcr.io/dekopon-agents/provider-python-source"
 PROVIDER_REPOSITORY = "ghcr.io/dekopon-agents/provider-python"
 RELEASE = "https://github.com/dekopon-agents/dekopon-provider-python/releases/tag/v0.1.0"
+OCI_LICENSES = "LGPL-3.0-only"
 SOURCE_MEDIA = {
     "python-provider.wasm.sha256": "text/plain",
     SOURCE_ARCHIVE: "application/gzip",
@@ -71,6 +72,7 @@ def main() -> None:
         "org.opencontainers.image.source": "https://github.com/dekopon-agents/dekopon-provider-python",
         "org.opencontainers.image.version": VERSION,
         "org.opencontainers.image.revision": revision,
+        "org.opencontainers.image.licenses": OCI_LICENSES,
         "org.dekopon.release.run": run,
         "org.dekopon.release.url": RELEASE,
         "org.dekopon.corresponding-source.archive": SOURCE_ARCHIVE,
