@@ -19,6 +19,8 @@ concurrency:
 env:
   RELEASE_SHA: "2d53bb45cf26140be6c41c8919de6a1c25fdcf71"
   SOURCE_RUN_ID: "32699303678"
+  RECOVERED_SOURCE_DIGEST: "sha256:627900760a75ad06898e647ec544b64b7beb560f981c2abb995c0ff1ae5ecdb4"
+  RECOVERED_SOURCE_RUN: "32709673725:1"
   ORAS_VERSION: "1.2.3"
   ORAS_LINUX_AMD64_SHA256: "b4efc97a91f471f323f193ea4b4d63d8ff443ca3aab514151a30751330852827"
   OCI_REPOSITORY: "ghcr.io/dekopon-agents/provider-python"
@@ -121,7 +123,21 @@ jobs:
             grep -Eqi 'not found|404' "$error"
           }
           package_absent provider-python
-          package_absent provider-python-source
+
+          # The first recovery run committed the exact source manifest before package-visibility
+          # propagation timed out. Resume only from that public, sole-version, byte-verified effect.
+          gh api "/orgs/dekopon-agents/packages/container/provider-python-source" \
+            >"$RUNNER_TEMP/source-package.json"
+          jq -e '.visibility == "public"' "$RUNNER_TEMP/source-package.json" >/dev/null
+          gh api --paginate \
+            "/orgs/dekopon-agents/packages/container/provider-python-source/versions?per_page=100" \
+            >"$RUNNER_TEMP/source-versions.jsons"
+          jq -se --arg digest "$RECOVERED_SOURCE_DIGEST" '
+            [.[][]] as $versions |
+            ($versions | length) == 1 and
+            $versions[0].name == $digest and
+            (($versions[0].metadata.container.tags // []) | sort) == ["0.1.0"]
+          ' "$RUNNER_TEMP/source-versions.jsons" >/dev/null
 
           find_owned_draft() {
             gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" |
@@ -281,14 +297,16 @@ jobs:
             fi
           }
           set_package_visibility() {
-            local package=$1 target=$2
-            for _ in {1..10}; do
-              if gh api --method PUT \
-                "/orgs/dekopon-agents/packages/container/$package/visibility" \
-                -f "visibility=$target" >/dev/null 2>"$RUNNER_TEMP/$package-set-visibility.err" &&
-                [[ "$(package_visibility "$package" \
-                  "$RUNNER_TEMP/$package-check-visibility.err")" == "$target" ]]; then
-                return 0
+            local package=$1 target=$2 current
+            for _ in {1..30}; do
+              current=$(package_visibility "$package" \
+                "$RUNNER_TEMP/$package-check-visibility.err")
+              [[ "$current" == "$target" ]] && return 0
+              if [[ "$current" != absent ]]; then
+                gh api --method PATCH \
+                  "/orgs/dekopon-agents/packages/container/$package" \
+                  -f "visibility=$target" >/dev/null \
+                  2>"$RUNNER_TEMP/$package-set-visibility.err" || true
               fi
               sleep 2
             done
@@ -305,55 +323,12 @@ jobs:
             fi
           }
 
-          # Prove both immutable version tags absent before the first package mutation.
+          # The exact source manifest was committed by recovery run 32709673725 before package
+          # visibility propagation timed out. Preserve that immutable effect and prove every byte
+          # anonymously before making the still-absent provider package the only mutation here.
           assert_absent "$provider_ref" provider-version
-          assert_absent "$source_ref" source-version
-
-          # The corresponding-source final ref is the first manifest effect. Keep an existing
-          # package private until its exact run-owned manifest and digest have been authenticated.
-          prepare_private_package provider-python-source "$SOURCE_INITIAL_VISIBILITY"
+          source_digest=$RECOVERED_SOURCE_DIGEST
           archive=dekopon-python-provider-0.1.0-relink-source.tar.gz
-          archive_sha=$(sha256sum "dist/$archive" | awk '{print $1}')
-          (
-            cd dist
-            "$RUNNER_TEMP/oras-bin" push "$source_ref" \
-              --artifact-type application/vnd.dekopon.provider.source.v1 \
-              --annotation "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
-              --annotation "org.opencontainers.image.version=$VERSION" \
-              --annotation "org.opencontainers.image.revision=$RELEASE_SHA" \
-              --annotation "org.opencontainers.image.licenses=LGPL-3.0-only" \
-              --annotation "org.dekopon.release.run=$run" \
-              --annotation "org.dekopon.release.url=https://github.com/$GITHUB_REPOSITORY/releases/tag/v$VERSION" \
-              --annotation "org.dekopon.provider.oci=$OCI_REPOSITORY:$VERSION" \
-              --annotation "org.dekopon.corresponding-source.archive=$archive" \
-              --annotation "org.dekopon.corresponding-source.sha256=$archive_sha" \
-              --annotation "org.dekopon.distribution.notice=complete corresponding source and relink materials for LGPL-covered provider" \
-              python-provider.wasm.sha256:text/plain \
-              "$archive":application/gzip \
-              "$archive.sha256":text/plain \
-              dekopon-python-provider-0.1.0.cdx.json:application/vnd.cyclonedx+json \
-              THIRD_PARTY_NOTICES.md:text/markdown \
-              RELEASE_COMPLIANCE.md:text/markdown \
-              RELINKING.md:text/markdown \
-              LICENSE-MIT:text/plain \
-              LICENSE-APACHE:text/plain \
-              LICENSE-LGPL-2.1:text/plain \
-              LICENSE-LGPL-3.0:text/plain \
-              LICENSE-GPL-3.0:text/plain \
-              SHA256SUMS:text/plain
-          )
-          source_digest=$("$RUNNER_TEMP/oras-bin" manifest fetch --descriptor \
-            "$source_ref" | jq -er .digest)
-          [[ "$source_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
-          echo "source_manifest_digest=$source_digest" >>"$GITHUB_OUTPUT"
-          "$RUNNER_TEMP/oras-bin" manifest fetch \
-            "$SOURCE_OCI_REPOSITORY@$source_digest" >"$RUNNER_TEMP/source-manifest.json"
-          ./scripts/verify-oci-manifest.py source "$RUNNER_TEMP/source-manifest.json" \
-            dist "$run" "$RELEASE_SHA"
-          set_package_visibility provider-python-source public
-
-          # The source package must already be independently accessible and byte-exact without any
-          # credential before the provider package is changed or its final manifest is pushed.
           docker logout ghcr.io
           mkdir "$RUNNER_TEMP/anonymous-source-before-provider"
           test "$(env -u GH_TOKEN -u GITHUB_TOKEN "$RUNNER_TEMP/oras-bin" manifest fetch \
@@ -361,7 +336,8 @@ jobs:
           env -u GH_TOKEN -u GITHUB_TOKEN "$RUNNER_TEMP/oras-bin" manifest fetch "$source_ref" \
             >"$RUNNER_TEMP/anonymous-source-before-provider.json"
           ./scripts/verify-oci-manifest.py source \
-            "$RUNNER_TEMP/anonymous-source-before-provider.json" dist "$run" "$RELEASE_SHA"
+            "$RUNNER_TEMP/anonymous-source-before-provider.json" dist \
+            "$RECOVERED_SOURCE_RUN" "$RELEASE_SHA"
           env -u GH_TOKEN -u GITHUB_TOKEN "$RUNNER_TEMP/oras-bin" pull "$source_ref" \
             --output "$RUNNER_TEMP/anonymous-source-before-provider"
           cp dist/python-provider.wasm "$RUNNER_TEMP/anonymous-source-before-provider/"
@@ -369,16 +345,14 @@ jobs:
             "$RUNNER_TEMP/anonymous-source-before-provider" 0.1.0
           expected=$(find dist -maxdepth 1 -type f -exec basename {} \; | LC_ALL=C sort)
           while IFS= read -r name; do
-            [[ "$name" == python-provider.wasm ]] && continue
             cmp "dist/$name" "$RUNNER_TEMP/anonymous-source-before-provider/$name"
           done <<<"$expected"
+          test "$(package_visibility provider-python-source \
+            "$RUNNER_TEMP/source-public.err")" = public
+          echo "source_manifest_digest=$source_digest" >>"$GITHUB_OUTPUT"
 
           printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" \
             --password-stdin >/dev/null
-          test "$(package_visibility provider-python-source \
-            "$RUNNER_TEMP/source-public.err")" = public
-          test "$("$RUNNER_TEMP/oras-bin" manifest fetch --descriptor "$source_ref" |
-            jq -er .digest)" = "$source_digest"
 
           # Recheck the provider final tag after the source checks, then make any existing provider
           # package private so its sole new version cannot be exposed before manifest validation.
@@ -419,7 +393,7 @@ jobs:
           env -u GH_TOKEN -u GITHUB_TOKEN "$RUNNER_TEMP/oras-bin" manifest fetch "$source_ref" \
             >"$RUNNER_TEMP/anonymous-source.json"
           ./scripts/verify-oci-manifest.py source "$RUNNER_TEMP/anonymous-source.json" \
-            dist "$run" "$RELEASE_SHA"
+            dist "$RECOVERED_SOURCE_RUN" "$RELEASE_SHA"
           env -u GH_TOKEN -u GITHUB_TOKEN "$RUNNER_TEMP/oras-bin" manifest fetch "$provider_ref" \
             >"$RUNNER_TEMP/anonymous-provider.json"
           ./scripts/verify-oci-manifest.py provider "$RUNNER_TEMP/anonymous-provider.json" \
@@ -503,7 +477,7 @@ jobs:
           env -u GH_TOKEN -u GITHUB_TOKEN "$RUNNER_TEMP/oras-bin" manifest fetch "$source_ref" \
             >"$RUNNER_TEMP/final-source.json"
           ./scripts/verify-oci-manifest.py source "$RUNNER_TEMP/final-source.json" \
-            dist "$run" "$RELEASE_SHA"
+            dist "$RECOVERED_SOURCE_RUN" "$RELEASE_SHA"
           env -u GH_TOKEN -u GITHUB_TOKEN "$RUNNER_TEMP/oras-bin" manifest fetch "$provider_ref" \
             >"$RUNNER_TEMP/final-provider.json"
           ./scripts/verify-oci-manifest.py provider "$RUNNER_TEMP/final-provider.json" \
@@ -608,7 +582,7 @@ jobs:
           env -u GH_TOKEN -u GITHUB_TOKEN "$RUNNER_TEMP/oras" manifest fetch \
             "$SOURCE_OCI_REPOSITORY:$VERSION" >source-manifest.json
           ./scripts/verify-oci-manifest.py source source-manifest.json \
-            release "$run" "$RELEASE_SHA"
+            release "$RECOVERED_SOURCE_RUN" "$RELEASE_SHA"
           env -u GH_TOKEN -u GITHUB_TOKEN "$RUNNER_TEMP/oras" manifest fetch \
             "$OCI_REPOSITORY:$VERSION" >provider-manifest.json
           ./scripts/verify-oci-manifest.py provider provider-manifest.json \
@@ -757,8 +731,8 @@ jobs:
           }
           record_owned_final_manifest "$OCI_REPOSITORY" "$OCI_REPOSITORY:0.1.0" \
             "$PROVIDER_DIGEST" "$provider_record" provider-final
-          record_owned_final_manifest "$SOURCE_OCI_REPOSITORY" \
-            "$SOURCE_OCI_REPOSITORY:0.1.0" "$SOURCE_DIGEST" "$source_record" source-final
+          # The source manifest belongs to the earlier verified recovery run and is now an
+          # authorized immutable prerequisite. Never classify it as this run's cleanup effect.
 
           if [[ -z "$PROVIDER_INITIAL_VISIBILITY" || -z "$SOURCE_INITIAL_VISIBILITY" ]]; then
             if [[ ! -s "$provider_record" && ! -s "$source_record" &&
@@ -776,11 +750,14 @@ jobs:
             gh api --paginate \
               "/orgs/dekopon-agents/packages/container/$package/versions?per_page=100" \
               >"$versions"
-            jq -se --arg digest "$digest" --arg tag 0.1.0 \
-              '[.[][] | select(.name == $digest)] as $matches |
-               ($matches | length) == 1 and
-               (($matches[0].metadata.container.tags // []) | sort) == [$tag]' \
-              "$versions" >/dev/null || {
+            jq -ser --arg digest "$digest" --arg tag 0.1.0 '
+              [.[][] | select(.name == $digest)] as $matches |
+              if ($matches | length) == 1 and
+                 (($matches[0].metadata.container.tags // []) | sort) == [$tag]
+              then $matches[0].id
+              else error("missing or shared manifest")
+              end
+            ' "$versions" || {
               echo "error: refusing to delete missing or shared manifest $package@$digest" >&2
               return 1
             }
@@ -796,11 +773,14 @@ jobs:
               "$RUNNER_TEMP/$label-delete-check.err"
           }
           delete_owned_manifest() {
-            local package=$1 repository=$2 reference=$3 record=$4 label=$5 digest
+            local package=$1 repository=$2 reference=$3 record=$4 label=$5 digest version_id
             [[ -s "$record" ]] || return 0
             digest=$(<"$record")
-            assert_manifest_has_only_final_tag "$package" "$digest"
-            "$RUNNER_TEMP/oras" manifest delete --force "$repository@$digest"
+            version_id=$(assert_manifest_has_only_final_tag "$package" "$digest")
+            [[ "$version_id" =~ ^[0-9]+$ ]]
+            : "$repository"
+            gh api --method DELETE \
+              "/orgs/dekopon-agents/packages/container/$package/versions/$version_id"
             assert_ref_absent "$reference" "$label"
           }
           current_visibility() {
@@ -818,14 +798,15 @@ jobs:
           }
           put_visibility() {
             local package=$1 target=$2
-            for _ in {1..10}; do
-              if gh api --method PUT \
-                "/orgs/dekopon-agents/packages/container/$package/visibility" \
-                -f "visibility=$target" >/dev/null 2>"$RUNNER_TEMP/$package-restore.err" &&
-                [[ "$(current_visibility "$package" \
-                  "$RUNNER_TEMP/$package-restored.err")" == "$target" ]]; then
+            for _ in {1..30}; do
+              if [[ "$(current_visibility "$package" \
+                "$RUNNER_TEMP/$package-restored.err")" == "$target" ]]; then
                 return 0
               fi
+              gh api --method PATCH \
+                "/orgs/dekopon-agents/packages/container/$package" \
+                -f "visibility=$target" >/dev/null \
+                2>"$RUNNER_TEMP/$package-restore.err" || true
               sleep 2
             done
             cat "$RUNNER_TEMP/$package-restore.err" >&2 || true
@@ -851,14 +832,11 @@ jobs:
             fi
           }
 
-          # Never remove source while a run-owned provider survives. No other tag is created for
-          # either digest, and package metadata must prove the manifest is not shared before DELETE.
+          # Remove only a provider manifest committed by this run. The exact public source
+          # prerequisite remains immutable across retries and is never a cleanup target here.
           delete_owned_manifest provider-python "$OCI_REPOSITORY" \
             "$OCI_REPOSITORY:0.1.0" "$provider_record" provider-final
           restore_visibility provider-python "$PROVIDER_INITIAL_VISIBILITY"
-          delete_owned_manifest provider-python-source "$SOURCE_OCI_REPOSITORY" \
-            "$SOURCE_OCI_REPOSITORY:0.1.0" "$source_record" source-final
-          restore_visibility provider-python-source "$SOURCE_INITIAL_VISIBILITY"
 
           if [[ "$release_owned_draft" == true ]]; then
             gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/$release_id"

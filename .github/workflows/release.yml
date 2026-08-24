@@ -421,14 +421,16 @@ jobs:
             fi
           }
           set_package_visibility() {
-            local package=$1 target=$2
-            for _ in {1..10}; do
-              if gh api --method PUT \
-                "/orgs/dekopon-agents/packages/container/$package/visibility" \
-                -f "visibility=$target" >/dev/null 2>"$RUNNER_TEMP/$package-set-visibility.err" &&
-                [[ "$(package_visibility "$package" \
-                  "$RUNNER_TEMP/$package-check-visibility.err")" == "$target" ]]; then
-                return 0
+            local package=$1 target=$2 current
+            for _ in {1..30}; do
+              current=$(package_visibility "$package" \
+                "$RUNNER_TEMP/$package-check-visibility.err")
+              [[ "$current" == "$target" ]] && return 0
+              if [[ "$current" != absent ]]; then
+                gh api --method PATCH \
+                  "/orgs/dekopon-agents/packages/container/$package" \
+                  -f "visibility=$target" >/dev/null \
+                  2>"$RUNNER_TEMP/$package-set-visibility.err" || true
               fi
               sleep 2
             done
@@ -911,11 +913,14 @@ jobs:
             gh api --paginate \
               "/orgs/dekopon-agents/packages/container/$package/versions?per_page=100" \
               >"$versions"
-            jq -se --arg digest "$digest" --arg tag 0.1.0 \
-              '[.[][] | select(.name == $digest)] as $matches |
-               ($matches | length) == 1 and
-               (($matches[0].metadata.container.tags // []) | sort) == [$tag]' \
-              "$versions" >/dev/null || {
+            jq -ser --arg digest "$digest" --arg tag 0.1.0 '
+              [.[][] | select(.name == $digest)] as $matches |
+              if ($matches | length) == 1 and
+                 (($matches[0].metadata.container.tags // []) | sort) == [$tag]
+              then $matches[0].id
+              else error("missing or shared manifest")
+              end
+            ' "$versions" || {
               echo "error: refusing to delete missing or shared manifest $package@$digest" >&2
               return 1
             }
@@ -931,11 +936,14 @@ jobs:
               "$RUNNER_TEMP/$label-delete-check.err"
           }
           delete_owned_manifest() {
-            local package=$1 repository=$2 reference=$3 record=$4 label=$5 digest
+            local package=$1 repository=$2 reference=$3 record=$4 label=$5 digest version_id
             [[ -s "$record" ]] || return 0
             digest=$(<"$record")
-            assert_manifest_has_only_final_tag "$package" "$digest"
-            "$RUNNER_TEMP/oras" manifest delete --force "$repository@$digest"
+            version_id=$(assert_manifest_has_only_final_tag "$package" "$digest")
+            [[ "$version_id" =~ ^[0-9]+$ ]]
+            : "$repository"
+            gh api --method DELETE \
+              "/orgs/dekopon-agents/packages/container/$package/versions/$version_id"
             assert_ref_absent "$reference" "$label"
           }
           current_visibility() {
@@ -953,14 +961,15 @@ jobs:
           }
           put_visibility() {
             local package=$1 target=$2
-            for _ in {1..10}; do
-              if gh api --method PUT \
-                "/orgs/dekopon-agents/packages/container/$package/visibility" \
-                -f "visibility=$target" >/dev/null 2>"$RUNNER_TEMP/$package-restore.err" &&
-                [[ "$(current_visibility "$package" \
-                  "$RUNNER_TEMP/$package-restored.err")" == "$target" ]]; then
+            for _ in {1..30}; do
+              if [[ "$(current_visibility "$package" \
+                "$RUNNER_TEMP/$package-restored.err")" == "$target" ]]; then
                 return 0
               fi
+              gh api --method PATCH \
+                "/orgs/dekopon-agents/packages/container/$package" \
+                -f "visibility=$target" >/dev/null \
+                2>"$RUNNER_TEMP/$package-restore.err" || true
               sleep 2
             done
             cat "$RUNNER_TEMP/$package-restore.err" >&2 || true

@@ -64,10 +64,14 @@ done
   echo 'error: both and only the two final OCI manifests must carry the unique run annotation' >&2
   exit 1
 }
-[[ "$(grep -Fc 'manifest delete --force' "$release")" -eq 1 ]] || {
-  echo 'error: cleanup must have one ownership-gated final-manifest delete path' >&2
+[[ "$(grep -Fc 'packages/container/$package/versions/$version_id' "$release")" -eq 1 ]] || {
+  echo 'error: cleanup must have one ownership-gated package-version delete path' >&2
   exit 1
 }
+if grep -Fq 'manifest delete --force' "$release"; then
+  echo 'error: GHCR does not support direct ORAS manifest deletion' >&2
+  exit 1
+fi
 actual_repositories=$(grep -Eo 'ghcr[.]io/dekopon-agents/[a-z0-9-]+' "$release" | LC_ALL=C sort -u)
 expected_repositories=$(printf '%s\n' \
   ghcr.io/dekopon-agents/provider-python \
@@ -156,6 +160,8 @@ for required in \
   'recover v0.1.0 from run 32699303678' \
   'RELEASE_SHA: "2d53bb45cf26140be6c41c8919de6a1c25fdcf71"' \
   'SOURCE_RUN_ID: "32699303678"' \
+  'RECOVERED_SOURCE_DIGEST: "sha256:627900760a75ad06898e647ec544b64b7beb560f981c2abb995c0ff1ae5ecdb4"' \
+  'RECOVERED_SOURCE_RUN: "32709673725:1"' \
   'ref: v0.1.0' \
   'provider-python-run:$SOURCE_RUN_ID:1' \
   'github-token: ${{ github.token }}' \
