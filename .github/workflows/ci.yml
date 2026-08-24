@@ -197,13 +197,47 @@ jobs:
           rustup target add wasm32-unknown-unknown --toolchain "$PROVIDER_RUST_TOOLCHAIN"
           cargo +"$PROVIDER_RUST_TOOLCHAIN" install wasm-tools \
             --version "$WASM_TOOLS_VERSION" --locked
-      - name: Build independent checkouts and compare bytes
+      - name: Build independent checkouts and compare generated inputs, core, and component bytes
         shell: bash
         run: |
           set -euo pipefail
+          diagnostics="$RUNNER_TEMP/python-provider-repro-diagnostics"
+          mkdir -p "$diagnostics"
+
           (cd source-a && ./scripts/build-component.sh)
+          mapfile -t env_a < <(find \
+            source-a/target/wasm32-unknown-unknown/release/build \
+            -path '*/rustpython-vm-*/out/env_vars.rs' -type f -print)
+          test "${#env_a[@]}" -eq 1
+          cp "${env_a[0]}" "$diagnostics/rustpython-env-a.rs"
+          cp source-a/target/wasm32-unknown-unknown/release/dekopon_python_provider.wasm \
+            "$diagnostics/core-a.wasm"
+          cp source-a/python-provider.wasm "$diagnostics/component-a.wasm"
+
           rm -rf /tmp/dekopon-python-provider-canonical/target
           (cd source-b && ./scripts/build-component.sh)
-          cmp source-a/python-provider.wasm source-b/python-provider.wasm
+          mapfile -t env_b < <(find \
+            source-b/target/wasm32-unknown-unknown/release/build \
+            -path '*/rustpython-vm-*/out/env_vars.rs' -type f -print)
+          test "${#env_b[@]}" -eq 1
+          cp "${env_b[0]}" "$diagnostics/rustpython-env-b.rs"
+          cp source-b/target/wasm32-unknown-unknown/release/dekopon_python_provider.wasm \
+            "$diagnostics/core-b.wasm"
+          cp source-b/python-provider.wasm "$diagnostics/component-b.wasm"
+
+          wasm-tools objdump "$diagnostics/component-a.wasm" >"$diagnostics/sections-a.txt"
+          wasm-tools objdump "$diagnostics/component-b.wasm" >"$diagnostics/sections-b.txt"
+          sha256sum "$diagnostics"/*
+          cmp "$diagnostics/rustpython-env-a.rs" "$diagnostics/rustpython-env-b.rs"
+          cmp "$diagnostics/core-a.wasm" "$diagnostics/core-b.wasm"
+          cmp "$diagnostics/component-a.wasm" "$diagnostics/component-b.wasm"
           cmp source-a/python-provider.wasm.sha256 source-b/python-provider.wasm.sha256
-          wasm-tools validate source-a/python-provider.wasm
+          wasm-tools validate "$diagnostics/component-a.wasm"
+      - name: Upload exact reproducibility diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: python-provider-repro-diagnostics-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/python-provider-repro-diagnostics/
+          if-no-files-found: error
+          retention-days: 14

@@ -82,12 +82,31 @@ jobs:
           ref: ${{ github.ref }}
           path: rebuild
           persist-credentials: false
-      - name: Rebuild independently and require byte identity
+      - name: Rebuild independently and require generated input, core, and component identity
         shell: bash
         run: |
           set -euo pipefail
+          mapfile -t env_a < <(find \
+            target/wasm32-unknown-unknown/release/build \
+            -path '*/rustpython-vm-*/out/env_vars.rs' -type f -print)
+          test "${#env_a[@]}" -eq 1
+          cp "${env_a[0]}" "$RUNNER_TEMP/rustpython-env-a.rs"
+          cp target/wasm32-unknown-unknown/release/dekopon_python_provider.wasm \
+            "$RUNNER_TEMP/core-a.wasm"
+
           rm -rf /tmp/dekopon-python-provider-canonical/target
           (cd rebuild && ./scripts/build-component.sh)
+          mapfile -t env_b < <(find \
+            rebuild/target/wasm32-unknown-unknown/release/build \
+            -path '*/rustpython-vm-*/out/env_vars.rs' -type f -print)
+          test "${#env_b[@]}" -eq 1
+          sha256sum "$RUNNER_TEMP/rustpython-env-a.rs" "${env_b[0]}" \
+            "$RUNNER_TEMP/core-a.wasm" \
+            rebuild/target/wasm32-unknown-unknown/release/dekopon_python_provider.wasm \
+            python-provider.wasm rebuild/python-provider.wasm
+          cmp "$RUNNER_TEMP/rustpython-env-a.rs" "${env_b[0]}"
+          cmp "$RUNNER_TEMP/core-a.wasm" \
+            rebuild/target/wasm32-unknown-unknown/release/dekopon_python_provider.wasm
           cmp python-provider.wasm rebuild/python-provider.wasm
           cmp python-provider.wasm.sha256 rebuild/python-provider.wasm.sha256
           sha256sum --check --strict python-provider.wasm.sha256

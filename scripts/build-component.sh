@@ -132,28 +132,42 @@ encoded_rustflags=$(printf '%s\x1f' "${rustflags[@]}")
 encoded_rustflags=${encoded_rustflags%$'\x1f'}
 
 safe_path="$root/.canonical-bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
-env -i \
-  HOME="$home" \
-  USER=dekopon-builder \
-  LOGNAME=dekopon-builder \
-  PATH="$safe_path" \
-  CARGO_HOME="$cargo_home" \
-  RUSTUP_HOME="$rustup_home" \
-  CARGO_TERM_COLOR=never \
-  CARGO_ENCODED_RUSTFLAGS="$encoded_rustflags" \
-  LANG=C.UTF-8 \
-  LC_ALL=C \
-  SOURCE_DATE_EPOCH=0 \
-  TMPDIR=/tmp \
-  "$root/.canonical-bin/cargo" +"$required_rust" rustc \
-    --jobs 1 \
-    --locked \
-    --manifest-path "$root/Cargo.toml" \
-    --target wasm32-unknown-unknown \
-    --release \
-    -- \
-    -C metadata=dekopon-python-provider-0.1.0-repro-v1 \
-    -C extra-filename=
+canonical_env=(
+  env -i
+  HOME="$home"
+  USER=dekopon-builder
+  LOGNAME=dekopon-builder
+  PATH="$safe_path"
+  CARGO_HOME="$cargo_home"
+  RUSTUP_HOME="$rustup_home"
+  CARGO_TERM_COLOR=never
+  CARGO_ENCODED_RUSTFLAGS="$encoded_rustflags"
+  LANG=C.UTF-8
+  LC_ALL=C
+  SOURCE_DATE_EPOCH=0
+  TMPDIR=/tmp
+)
+cargo=("$root/.canonical-bin/cargo" +"$required_rust")
+
+# Cargo injects its process-local jobserver descriptors through CARGO_MAKEFLAGS. RustPython 0.5.0
+# freezes that value into `_sysconfigdata`. On Linux, a cold registry fetch keeps extra descriptors
+# open while Cargo creates its jobserver (observed as 3,9), whereas the next clean-target build uses
+# the warm registry (3,5). Resolve and download in a separate process, then require the compilation
+# process to stay offline so cold and warm callers compile from the same descriptor state.
+"${canonical_env[@]}" "${cargo[@]}" fetch \
+  --locked \
+  --manifest-path "$root/Cargo.toml" \
+  --target wasm32-unknown-unknown
+"${canonical_env[@]}" "${cargo[@]}" rustc \
+  --offline \
+  --jobs 1 \
+  --locked \
+  --manifest-path "$root/Cargo.toml" \
+  --target wasm32-unknown-unknown \
+  --release \
+  -- \
+  -C metadata=dekopon-python-provider-0.1.0-repro-v1 \
+  -C extra-filename=
 
 wasm-tools validate "$core"
 "$root/scripts/assert-zero-core-imports.sh" "$core"
