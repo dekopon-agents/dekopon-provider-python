@@ -49,18 +49,47 @@ for package in packages:
         raise SystemExit(f"error: {key[0]} {key[1]} checksum drift")
 PY
 
+patch_manifest="$root/patches/rustpython-derive-impl/Cargo.toml"
+patch_source="$root/patches/rustpython-derive-impl/src/compile_bytecode.rs"
+patch_class="$root/patches/rustpython-derive-impl/src/pyclass.rs"
+patch_module="$root/patches/rustpython-derive-impl/src/pymodule.rs"
+[[ -f "$patch_manifest" && -f "$patch_source" && -f "$patch_class" && -f "$patch_module" ]] || {
+  echo 'error: missing the pinned RustPython frozen-module reproducibility patch' >&2
+  exit 1
+}
+grep -Fq 'rustpython-derive-impl = { path = "patches/rustpython-derive-impl" }' \
+  "$root/Cargo.toml" || {
+  echo 'error: Cargo.toml does not select the local RustPython reproducibility patch' >&2
+  exit 1
+}
+grep -Fq 'collections::BTreeMap' "$patch_source"
+grep -Fq 'paths.sort_by_key(|entry| entry.file_name());' "$patch_source"
+grep -Fq 'map: BTreeMap<String, MemberNurseryEntry>' "$patch_class"
+grep -Fq 'properties.sort_by(' "$patch_class"
+grep -Fq 'py_names.sort();' "$patch_module"
+rustup run 1.97.0 rustfmt --edition 2024 --check \
+  "$patch_source" "$patch_class" "$patch_module"
+if grep -Fq 'collections::HashMap' "$patch_source"; then
+  echo 'error: patched py_freeze still uses randomized module ordering' >&2
+  exit 1
+fi
+
 metadata=$(mktemp)
 tree=$(mktemp)
 features=$(mktemp)
 trap 'rm -f "$metadata" "$tree" "$features"' EXIT
 cargo metadata --locked --manifest-path "$root/Cargo.toml" --format-version 1 >"$metadata"
-jq -e --arg root "dekopon-python-provider" '
+jq -e \
+  --arg root "dekopon-python-provider" \
+  --arg patch "$patch_manifest" '
   all(.packages[];
     .name == $root or
+    (.name == "rustpython-derive-impl" and .version == "0.5.0" and
+      .source == null and .manifest_path == $patch) or
     ((.source // "") | startswith("registry+https://github.com/rust-lang/crates.io-index"))
   )
 ' "$metadata" >/dev/null || {
-  echo "error: non-registry or local path dependency found" >&2
+  echo "error: dependency source is neither crates.io nor the exact local RustPython patch" >&2
   exit 1
 }
 

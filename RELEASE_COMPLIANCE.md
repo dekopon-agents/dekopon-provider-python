@@ -35,7 +35,8 @@ mechanical interlock; it is not a request to repeat the policy decision.
   scripts, workflows, and deployment documentation;
 - MIT, Apache, LGPL 2.1, LGPL 3.0, and GPL 3.0 texts plus all project notices;
 - a complete `cargo vendor --locked --versioned-dirs` closure for every registry package in the
-  lockfile, including exact complete Malachite 0.9.2 sources and their upstream license files;
+  lockfile, including exact complete Malachite 0.9.2 sources and their upstream license files, plus
+  the complete locally patched `rustpython-derive-impl 0.5.0` source selected by `Cargo.toml`;
 - an offline Cargo source replacement, deterministic `SOURCE_MANIFEST.json`, a SHA-256 inventory
   of every source file, and a reproducible CycloneDX 1.5 JSON SBOM made by exactly
   `cargo-cyclonedx` 0.5.9 with `SOURCE_DATE_EPOCH=0`.

@@ -67,9 +67,12 @@ Host fuel and deadlines, rather than hash randomization, bound adversarial algor
 
 RustPython 0.5.0's build script copies its complete build environment into frozen
 `_sysconfigdata`. The release builder therefore compiles a clean fixed-path source snapshot under
-an explicit non-secret environment and rejects sensitive key markers in the artifact. Running a
-plain release Cargo build is useful as a compile gate but is **not** an approved distributable
-build; only `scripts/build-component.sh` produces the scrubbed component.
+an explicit non-secret environment and rejects sensitive key markers in the artifact. Its complete
+local `rustpython-derive-impl 0.5.0` patch also replaces randomized `py_freeze!` module ordering and
+map/set-backed macro token emission with ordered traversal; it does not remove or rewrite Python or
+Rust code or data. Running a plain release Cargo build is useful as a compile gate but is **not** an
+approved distributable build;
+only `scripts/build-component.sh` produces the scrubbed component.
 
 Every official component is bound by checksums and OCI annotations to a versioned corresponding-
 source archive. That archive includes the exact provider source and complete vendored lockfile

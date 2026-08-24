@@ -73,6 +73,19 @@ if [[ ${DEKOPON_PYTHON_CANONICAL_INNER:-0} != 1 ]]; then
   mkdir -p "$canonical/.canonical-bin" "$canonical/.canonical-home"
   ln -s "$real_cargo_home" "$canonical/.canonical-cargo-home"
   ln -s "$real_rustup_home" "$canonical/.canonical-rustup-home"
+  # The scrubbed HOME must not redirect a configured sccache wrapper into a per-build cache. Mirror
+  # only the machine's cache-authority config path into the canonical HOME; its configured absolute
+  # cache directory remains shared, while no additional variable enters RustPython's frozen env.
+  for sccache_config in \
+    "$HOME/Library/Application Support/Mozilla.sccache/config" \
+    "$HOME/.config/sccache/config"; do
+    if [[ -f "$sccache_config" ]]; then
+      canonical_sccache_config="$canonical/.canonical-home/${sccache_config#"$HOME"/}"
+      mkdir -p "$(dirname "$canonical_sccache_config")"
+      ln -s "$sccache_config" "$canonical_sccache_config"
+      break
+    fi
+  done
   ln -s "$(command -v cargo)" "$canonical/.canonical-bin/cargo"
   ln -s "$(command -v rustup)" "$canonical/.canonical-bin/rustup"
   # Darwin installs sha256sum in /sbin, which is deliberately absent from the scrubbed PATH.
@@ -152,12 +165,13 @@ cargo=("$root/.canonical-bin/cargo" +"$required_rust")
 # Cargo injects its process-local jobserver descriptors through CARGO_MAKEFLAGS. RustPython 0.5.0
 # freezes that value into `_sysconfigdata`. On Linux, a cold registry fetch keeps extra descriptors
 # open while Cargo creates its jobserver (observed as 3,9), whereas the next clean-target build uses
-# the warm registry (3,5). Resolve and download in a separate process, then require the compilation
-# process to stay offline so cold and warm callers compile from the same descriptor state.
+# the warm registry (3,5). Resolve and download the complete locked graph in a separate process,
+# then require the compilation process to stay offline so cold and warm callers compile from the
+# same descriptor state. Do not target-filter the fetch: Cargo can otherwise omit target-neutral
+# packages that the selected feature graph still needs during the offline compilation.
 "${canonical_env[@]}" "${cargo[@]}" fetch \
   --locked \
-  --manifest-path "$root/Cargo.toml" \
-  --target wasm32-unknown-unknown
+  --manifest-path "$root/Cargo.toml"
 "${canonical_env[@]}" "${cargo[@]}" rustc \
   --offline \
   --jobs 1 \

@@ -124,7 +124,7 @@ manifest = {
     "cargoCycloneDx": "0.5.9",
     "lockedPackageCount": len(packages),
     "vendoredRegistryPackageCount": len(registry),
-    "dependencySourceMode": "complete versioned Cargo vendor closure; offline source replacement",
+    "dependencySourceMode": "complete local RustPython patch plus versioned Cargo vendor closure; offline source replacement",
     "relinkInstructions": "RELINKING.md",
     "lgplPackages": [
         {"name": "malachite-base", "version": "0.9.2", "sha256": "a4f44099731f17094b07825c88ccb5fbd1bfa1f82fafff7daa33e8b8652db16e"},

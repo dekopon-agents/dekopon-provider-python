@@ -28,8 +28,11 @@ rejects any tracked `*.wasm`. `build-component.sh` builds a clean source snapsho
 canonical path under a scrubbed environment because RustPython 0.5.0's build script otherwise
 freezes every visible build variable into `_sysconfigdata` (including accidental credentials). It
 retains the ordinary default target for that standalone snapshot and global sccache; no compiler
-wrapper, `CARGO_TARGET_DIR`, or incremental setting is replaced. The gate scans the resulting
-component for sensitive environment keys.
+wrapper, `CARGO_TARGET_DIR`, or incremental setting is replaced. The pinned
+`rustpython-derive-impl 0.5.0` source patch sorts `py_freeze!` module traversal and every
+map/set-backed macro token emission instead of compiling randomly seeded collection order. The gate
+scans the resulting component for sensitive environment keys and compares the complete frozen build
+input, raw core, and final component across independent builds.
 
 The official Wasm is always distributed with a versioned corresponding-source/relink archive and
 CycloneDX SBOM. The archive carries this exact application source, WIT and lockfile plus the

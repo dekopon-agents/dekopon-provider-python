@@ -239,5 +239,5 @@ jobs:
         with:
           name: python-provider-repro-diagnostics-${{ github.run_attempt }}
           path: ${{ runner.temp }}/python-provider-repro-diagnostics/
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 14

@@ -46,7 +46,11 @@ package's “or later” option.
 
 - `rustpython-vm 0.5.0` and `rustpython-stdlib 0.5.0`, together with the synchronized
   `rustpython-* 0.5.0` implementation crates, are from
-  <https://github.com/RustPython/RustPython> and use RustPython's MIT terms.
+  <https://github.com/RustPython/RustPython> and use RustPython's MIT terms. The complete
+  `rustpython-derive-impl 0.5.0` source in `patches/rustpython-derive-impl` carries a local
+  reproducibility fix that sorts frozen-module traversal and map/set-backed macro token emission
+  without changing Python or Rust code or data; `README.dekopon.md` records the original crate
+  checksum and exact modification.
 - `rustpython-pylib 0.5.0` embeds Python library material under the Python Software Foundation
   License / `Python-2.0.1`. Its authoritative text is `Lib/PSF-LICENSE` in that exact crate source.
 - `rustpython-doc 0.5.0` carries `Python-2.0.1`; `deny.toml` pins the detected license-file hash.
