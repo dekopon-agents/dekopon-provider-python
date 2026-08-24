@@ -149,6 +149,36 @@ if cleanup_release_delete < cleanup_draft_guard:
     raise SystemExit("error: cleanup can delete a release without the owned-draft guard")
 PY
 
+recovery="$root/.github/workflows/release-recovery.yml"
+[[ -f "$recovery" ]] || { echo 'error: missing immutable v0.1.0 recovery workflow' >&2; exit 1; }
+for required in \
+  'workflow_dispatch:' \
+  'recover v0.1.0 from run 32699303678' \
+  'RELEASE_SHA: "2d53bb45cf26140be6c41c8919de6a1c25fdcf71"' \
+  'SOURCE_RUN_ID: "32699303678"' \
+  'ref: v0.1.0' \
+  'provider-python-run:$SOURCE_RUN_ID:1' \
+  'github-token: ${{ github.token }}' \
+  'run-id: ${{ env.SOURCE_RUN_ID }}' \
+  'org.opencontainers.image.revision=$RELEASE_SHA' \
+  'ghcr.io/dekopon-agents/provider-python' \
+  'ghcr.io/dekopon-agents/provider-python-source'; do
+  grep -Fq "$required" "$recovery" || {
+    echo "error: release recovery workflow lacks $required" >&2
+    exit 1
+  }
+done
+recovery_repositories=$(grep -Eo 'ghcr[.]io/dekopon-agents/[a-z0-9-]+' "$recovery" | LC_ALL=C sort -u)
+[[ "$recovery_repositories" == "$expected_repositories" ]] || {
+  echo 'error: release recovery refers to an unauthorized package repository' >&2
+  exit 1
+}
+if grep -Eqi 'staging|provider-python(-source)?:(latest|stable)|--tag[ =]+(latest|stable)' \
+  "$recovery"; then
+  echo 'error: release recovery must use only immutable final package refs' >&2
+  exit 1
+fi
+
 asset_count=$(release_asset_names 0.1.0 | wc -l | tr -d ' ')
 source_count=$(source_oci_asset_names 0.1.0 | wc -l | tr -d ' ')
 [[ "$asset_count" == 14 && "$source_count" == 13 ]] || {

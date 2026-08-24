@@ -1,24 +1,24 @@
-name: Release v0.1.0
+name: Recover Release v0.1.0
 
 on:
-  push:
-    tags:
-      - "v0.1.0"
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type: recover v0.1.0 from run 32699303678"
+        required: true
+        type: string
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
-  group: release-${{ github.ref_name }}
+  group: release-recovery-v0.1.0
   cancel-in-progress: false
 
 env:
-  PROVIDER_RUST_TOOLCHAIN: "1.97.0"
-  PROVIDER_MSRV: "1.93.0"
-  WASM_TOOLS_VERSION: "1.236.1"
-  CARGO_DENY_VERSION: "0.20.2"
-  CARGO_CYCLONEDX_VERSION: "0.5.9"
-  DEKOPON_RUN_VERSION: "0.11.1"
+  RELEASE_SHA: "2d53bb45cf26140be6c41c8919de6a1c25fdcf71"
+  SOURCE_RUN_ID: "32699303678"
   ORAS_VERSION: "1.2.3"
   ORAS_LINUX_AMD64_SHA256: "b4efc97a91f471f323f193ea4b4d63d8ff443ca3aab514151a30751330852827"
   OCI_REPOSITORY: "ghcr.io/dekopon-agents/provider-python"
@@ -26,313 +26,170 @@ env:
 
 jobs:
   build:
-    name: verify immutable source, binary, and corresponding source
-    if: github.repository == 'dekopon-agents/dekopon-provider-python' && vars.PROVIDER_PYTHON_RELEASE_APPROVED == 'true'
+    name: recover and verify immutable attested assets
+    if: github.repository == 'dekopon-agents/dekopon-provider-python' && inputs.confirm == 'recover v0.1.0 from run 32699303678'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
+      actions: read
     outputs:
       version: ${{ steps.metadata.outputs.version }}
     steps:
-      - name: Check out immutable tag without credentials
+      - name: Check out the immutable annotated tag without credentials
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          ref: v0.1.0
           fetch-depth: 0
           persist-credentials: false
-      - name: Verify annotated tag, exact version, main ancestry, and compliance interlock
+      - name: Verify exact immutable tag and source revision
         id: metadata
         shell: bash
         run: |
           set -euo pipefail
-          test "$GITHUB_REF_NAME" = v0.1.0
-          test -f RELEASE_COMPLIANCE.md
-          git fetch --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
-          test "$(git cat-file -t "refs/tags/$GITHUB_REF_NAME")" = tag
-          test "$(git rev-parse "$GITHUB_REF_NAME^{}")" = "$GITHUB_SHA"
-          version=$(cargo metadata --locked --no-deps --format-version 1 |
-            jq -er '.packages[] | select(.name == "dekopon-python-provider") | .version')
-          test "$version" = 0.1.0
-          test "$GITHUB_REF_NAME" = "v$version"
+          test "$GITHUB_REF_NAME" = main
+          test "$(git cat-file -t refs/tags/v0.1.0)" = tag
+          test "$(git rev-parse 'v0.1.0^{}')" = "$RELEASE_SHA"
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
           git fetch --no-tags origin main:refs/remotes/origin/main
-          git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main
-          test -z "$(git ls-files '*.wasm')"
-          grep -Fq 'owner has accepted the exact LGPL dependency constraint' RELEASE_COMPLIANCE.md
-          echo "version=$version" >>"$GITHUB_OUTPUT"
-      - name: Install pinned build, policy, host, and SBOM tools
-        shell: bash
-        run: |
-          set -euo pipefail
-          rustup toolchain install "$PROVIDER_MSRV" --profile minimal
-          rustup toolchain install "$PROVIDER_RUST_TOOLCHAIN" --profile minimal \
-            --component clippy --component rustfmt
-          rustup target add wasm32-unknown-unknown --toolchain "$PROVIDER_RUST_TOOLCHAIN"
-          cargo +"$PROVIDER_RUST_TOOLCHAIN" install wasm-tools \
-            --version "$WASM_TOOLS_VERSION" --locked
-          cargo +"$PROVIDER_RUST_TOOLCHAIN" install cargo-deny \
-            --version "$CARGO_DENY_VERSION" --locked
-          cargo +"$PROVIDER_RUST_TOOLCHAIN" install cargo-cyclonedx \
-            --version "$CARGO_CYCLONEDX_VERSION" --locked
-          cargo +"$PROVIDER_RUST_TOOLCHAIN" install dekopon-run \
-            --version "$DEKOPON_RUN_VERSION" --locked
-      - name: Run complete source, component, host, policy, and measurement gates
-        run: ./scripts/validate.sh
-      - name: Check out independent tagged rebuild
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          ref: ${{ github.ref }}
-          path: rebuild
-          persist-credentials: false
-      - name: Rebuild independently and require generated input, core, and component identity
-        shell: bash
-        run: |
-          set -euo pipefail
-          mapfile -t env_a < <(find \
-            target/wasm32-unknown-unknown/release/build \
-            -path '*/rustpython-vm-*/out/env_vars.rs' -type f -print)
-          test "${#env_a[@]}" -eq 1
-          cp "${env_a[0]}" "$RUNNER_TEMP/rustpython-env-a.rs"
-          cp target/wasm32-unknown-unknown/release/dekopon_python_provider.wasm \
-            "$RUNNER_TEMP/core-a.wasm"
-
-          rm -rf /tmp/dekopon-python-provider-canonical/target
-          (cd rebuild && ./scripts/build-component.sh)
-          mapfile -t env_b < <(find \
-            rebuild/target/wasm32-unknown-unknown/release/build \
-            -path '*/rustpython-vm-*/out/env_vars.rs' -type f -print)
-          test "${#env_b[@]}" -eq 1
-          sha256sum "$RUNNER_TEMP/rustpython-env-a.rs" "${env_b[0]}" \
-            "$RUNNER_TEMP/core-a.wasm" \
-            rebuild/target/wasm32-unknown-unknown/release/dekopon_python_provider.wasm \
-            python-provider.wasm rebuild/python-provider.wasm
-          cmp "$RUNNER_TEMP/rustpython-env-a.rs" "${env_b[0]}"
-          cmp "$RUNNER_TEMP/core-a.wasm" \
-            rebuild/target/wasm32-unknown-unknown/release/dekopon_python_provider.wasm
-          cmp python-provider.wasm rebuild/python-provider.wasm
-          cmp python-provider.wasm.sha256 rebuild/python-provider.wasm.sha256
-          sha256sum --check --strict python-provider.wasm.sha256
-      - name: Build, reproduce, and offline-relink exact compliance assets
-        shell: bash
-        run: |
-          set -euo pipefail
-          ./scripts/prepare-release-assets.sh 0.1.0 dist
-          ./scripts/test-source-bundle-reproducibility.sh dist
-          ./scripts/test-source-bundle-relink.sh \
-            dist/dekopon-python-provider-0.1.0-relink-source.tar.gz \
-            dist/dekopon-python-provider-0.1.0.cdx.json
-          ./scripts/verify-release-assets.sh dist 0.1.0
-      - name: Upload exact immutable release asset set
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: release-assets
-          path: dist/
-          if-no-files-found: error
-          retention-days: 7
-
-  attest:
-    name: attest component and corresponding source
-    needs: build
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-      id-token: write
-      attestations: write
-    steps:
-      - name: Download exact release assets
+          git merge-base --is-ancestor "$RELEASE_SHA" refs/remotes/origin/main
+          test "$(cargo metadata --locked --no-deps --format-version 1 |
+            jq -er '.packages[] | select(.name == "dekopon-python-provider") | .version')" = 0.1.0
+          echo 'version=0.1.0' >>"$GITHUB_OUTPUT"
+      - name: Download the exact attested release asset artifact from the tagged run
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: release-assets
           path: dist
-      - name: Verify checksums before attestation
+          github-token: ${{ github.token }}
+          run-id: ${{ env.SOURCE_RUN_ID }}
+      - name: Verify all exact source-run bytes and embedded revision
         shell: bash
         run: |
           set -euo pipefail
           test "$(find dist -maxdepth 1 -type f | wc -l)" -eq 14
-          (cd dist && sha256sum --check --strict python-provider.wasm.sha256)
-          (cd dist && sha256sum --check --strict \
-            dekopon-python-provider-0.1.0-relink-source.tar.gz.sha256)
-          (cd dist && sha256sum --check --strict SHA256SUMS)
-      - name: Attest all exact release subjects
-        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
-        with:
-          subject-path: dist/*
+          ./scripts/verify-release-assets.sh dist 0.1.0
+          tar -xOf dist/dekopon-python-provider-0.1.0-relink-source.tar.gz \
+            dekopon-python-provider-0.1.0/SOURCE_MANIFEST.json |
+            jq -e --arg revision "$RELEASE_SHA" '.gitRevision == $revision' >/dev/null
 
   draft:
-    name: create and verify run-owned exact draft release
-    needs: [build, attest]
+    name: recover or recreate and verify the exact run-owned draft
+    needs: build
     runs-on: ubuntu-24.04
     permissions:
+      actions: read
       contents: write
       packages: read
     outputs:
-      release_id: ${{ steps.create.outputs.release_id }}
-      marker: ${{ steps.create.outputs.marker }}
-      provider_initial_visibility: ${{ steps.package_preflight.outputs.provider_initial_visibility }}
-      source_initial_visibility: ${{ steps.package_preflight.outputs.source_initial_visibility }}
+      release_id: ${{ steps.recover.outputs.release_id }}
+      marker: ${{ steps.recover.outputs.marker }}
+      provider_initial_visibility: ${{ steps.recover.outputs.provider_initial_visibility }}
+      source_initial_visibility: ${{ steps.recover.outputs.source_initial_visibility }}
     env:
       GH_REPO: ${{ github.repository }}
     steps:
-      - name: Check out verification scripts without credentials
+      - name: Check out immutable verification scripts without credentials
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          ref: v0.1.0
           persist-credentials: false
-      - name: Download exact release assets
+      - name: Download exact source-run assets
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: release-assets
           path: dist
-      - name: Prove both authorized final package versions absent and record visibility
-        id: package_preflight
+          github-token: ${{ github.token }}
+          run-id: ${{ env.SOURCE_RUN_ID }}
+      - name: Recover the exact draft and prove packages remain absent
+        id: recover
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ needs.build.outputs.version }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$VERSION" = 0.1.0
-          inspect_package() {
-            local package=$1 output_name=$2 visibility error versions
-            error="$RUNNER_TEMP/$package-preflight.err"
-            versions="$RUNNER_TEMP/$package-versions.jsons"
-            if visibility=$(gh api "/orgs/dekopon-agents/packages/container/$package" \
-              --jq .visibility 2>"$error"); then
-              [[ "$visibility" == private || "$visibility" == public ]]
-              gh api --paginate \
-                "/orgs/dekopon-agents/packages/container/$package/versions?per_page=100" \
-                >"$versions"
-              jq -se --arg tag "$VERSION" \
-                'all(.[][]; (((.metadata.container.tags // []) | index($tag)) == null))' \
-                "$versions" >/dev/null || {
-                echo "error: immutable OCI version already exists: $package:$VERSION" >&2
-                return 1
-              }
-            elif grep -Eqi 'not found|404' "$error"; then
-              visibility=absent
-            else
-              cat "$error" >&2
-              return 1
-            fi
-            printf '%s=%s\n' "$output_name" "$visibility" >>"$GITHUB_OUTPUT"
-          }
-          inspect_package provider-python provider_initial_visibility
-          inspect_package provider-python-source source_initial_visibility
-      - name: Refuse an existing release and create a marked draft
-        id: create
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PROVIDER_INITIAL_VISIBILITY: ${{ steps.package_preflight.outputs.provider_initial_visibility }}
-          SOURCE_INITIAL_VISIBILITY: ${{ steps.package_preflight.outputs.source_initial_visibility }}
         shell: bash
         run: |
           set -euo pipefail
           ./scripts/verify-release-assets.sh dist 0.1.0
-          [[ "$PROVIDER_INITIAL_VISIBILITY" =~ ^(absent|private|public)$ ]]
-          [[ "$SOURCE_INITIAL_VISIBILITY" =~ ^(absent|private|public)$ ]]
-          if gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" \
-            >"$RUNNER_TEMP/existing-release.json" 2>"$RUNNER_TEMP/existing-release.err"; then
-            echo "error: release already exists for immutable tag $GITHUB_REF_NAME" >&2
-            exit 1
-          elif ! grep -Eqi 'not found|404' "$RUNNER_TEMP/existing-release.err"; then
-            cat "$RUNNER_TEMP/existing-release.err" >&2
-            exit 1
-          fi
-          marker="provider-python-run:$GITHUB_RUN_ID:$GITHUB_RUN_ATTEMPT"
-          release_id=
-          find_owned_draft_id() {
+          marker="provider-python-run:$SOURCE_RUN_ID:1"
+          release_json="$RUNNER_TEMP/release.json"
+
+          package_absent() {
+            local package=$1 error="$RUNNER_TEMP/$1-package.err"
+            if gh api "/orgs/dekopon-agents/packages/container/$package" \
+              >"$RUNNER_TEMP/$package-package.json" 2>"$error"; then
+              echo "error: recovery refuses existing package $package" >&2
+              return 1
+            fi
+            grep -Eqi 'not found|404' "$error"
+          }
+          package_absent provider-python
+          package_absent provider-python-source
+
+          find_owned_draft() {
             gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" |
-              jq -ser --arg marker "$marker" '
+              jq -se --arg marker "$marker" '
                 [.[][] | select(
                   .draft == true and .tag_name == "v0.1.0" and
                   (.body | startswith($marker))
                 )] |
-                if length == 1 then .[0].id
+                if length == 1 then .[0]
                 elif length == 0 then empty
-                else error("multiple run-owned drafts")
+                else error("multiple owned recovery drafts")
                 end
               '
           }
-          cleanup_created_draft() {
-            if [[ -z "$release_id" ]]; then
-              release_id=$(find_owned_draft_id 2>/dev/null || true)
-            fi
-            if [[ -n "$release_id" ]] && gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" \
-              >"$RUNNER_TEMP/failed-draft.json" 2>/dev/null &&
-              jq -e --arg marker "$marker" \
-                '.draft == true and (.body | startswith($marker))' \
-                "$RUNNER_TEMP/failed-draft.json" >/dev/null; then
-              gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/$release_id" || true
-            fi
-          }
-          handle_draft_error() {
-            local status=$?
-            trap - ERR INT TERM
-            cleanup_created_draft
-            exit "$status"
-          }
-          handle_draft_signal() {
-            local status=$1
-            trap - ERR INT TERM
-            cleanup_created_draft
-            exit "$status"
-          }
-          trap handle_draft_error ERR
-          trap 'handle_draft_signal 130' INT
-          trap 'handle_draft_signal 143' TERM
-          cat >"$RUNNER_TEMP/release-notes.md" <<EOF
+          if ! find_owned_draft >"$release_json" || [[ ! -s "$release_json" ]]; then
+            cat >"$RUNNER_TEMP/release-notes.md" <<EOF
           $marker
-          provider-python-initial-visibility:$PROVIDER_INITIAL_VISIBILITY
-          provider-python-source-initial-visibility:$SOURCE_INITIAL_VISIBILITY
+          provider-python-initial-visibility:absent
+          provider-python-source-initial-visibility:absent
 
           IMPORTANT: python-provider.wasm embeds LGPL-3.0-only Malachite 0.9.2. Exact corresponding
           source, relinking instructions, notices, GNU license texts, checksums, and CycloneDX SBOM
           are attached and are also available at
           ghcr.io/dekopon-agents/provider-python-source:0.1.0. No latest tag is published.
           EOF
-          gh release create "$GITHUB_REF_NAME" --verify-tag --draft \
-            --title "$GITHUB_REF_NAME" \
-            --notes-file "$RUNNER_TEMP/release-notes.md" \
-            dist/*
-          for _ in {1..20}; do
-            if release_id=$(find_owned_draft_id 2>/dev/null) && [[ -n "$release_id" ]]; then
-              break
-            fi
-            sleep 2
-          done
-          test -n "$release_id"
-          echo "release_id=$release_id" >>"$GITHUB_OUTPUT"
-          echo "marker=$marker" >>"$GITHUB_OUTPUT"
-          trap - ERR INT TERM
-      - name: Redownload every draft asset by ID and compare bytes
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_ID: ${{ steps.create.outputs.release_id }}
-          MARKER: ${{ steps.create.outputs.marker }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" >"$RUNNER_TEMP/release.json"
-          jq -e --arg marker "$MARKER" \
-            '.draft == true and .tag_name == "v0.1.0" and (.body | startswith($marker))' \
-            "$RUNNER_TEMP/release.json" >/dev/null
+            gh release create v0.1.0 --verify-tag --draft \
+              --title v0.1.0 --notes-file "$RUNNER_TEMP/release-notes.md" dist/*
+            for _ in {1..20}; do
+              if find_owned_draft >"$release_json" && [[ -s "$release_json" ]]; then
+                break
+              fi
+              sleep 2
+            done
+          fi
+          jq -e --arg marker "$marker" --arg revision "$RELEASE_SHA" '
+            .draft == true and .tag_name == "v0.1.0" and
+            (.body | startswith($marker)) and
+            .target_commitish == "main"
+          ' "$release_json" >/dev/null
+          release_id=$(jq -er .id "$release_json")
           expected=$(find dist -maxdepth 1 -type f -exec basename {} \; | LC_ALL=C sort)
-          assets=$(jq -r '[.assets[].name] | sort | join("\n")' "$RUNNER_TEMP/release.json")
+          assets=$(jq -r '[.assets[].name] | sort | join("\n")' "$release_json")
           test "$assets" = "$expected"
           mkdir "$RUNNER_TEMP/redownload"
           while IFS= read -r name; do
-            asset_id=$(jq -er --arg name "$name" \
-              '[.assets[] | select(.name == $name)] | if length == 1 then .[0].id else error("asset cardinality") end' \
-              "$RUNNER_TEMP/release.json")
+            asset_id=$(jq -er --arg name "$name" '
+              [.assets[] | select(.name == $name)] |
+              if length == 1 then .[0].id else error("asset cardinality") end
+            ' "$release_json")
             gh api -H 'Accept: application/octet-stream' \
               "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id" \
               >"$RUNNER_TEMP/redownload/$name"
             cmp "dist/$name" "$RUNNER_TEMP/redownload/$name"
           done <<<"$expected"
           ./scripts/verify-release-assets.sh "$RUNNER_TEMP/redownload" 0.1.0
+          {
+            echo "release_id=$release_id"
+            echo "marker=$marker"
+            echo 'provider_initial_visibility=absent'
+            echo 'source_initial_visibility=absent'
+          } >>"$GITHUB_OUTPUT"
 
   ghcr:
     name: publish final source first, then one-layer provider, and verify anonymously
     needs: [build, draft]
     runs-on: ubuntu-24.04
     permissions:
+      actions: read
       contents: read
       packages: write
     outputs:
@@ -342,12 +199,15 @@ jobs:
       - name: Check out manifest verification scripts without credentials
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          ref: v0.1.0
           persist-credentials: false
       - name: Download exact release assets
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: release-assets
           path: dist
+          github-token: ${{ github.token }}
+          run-id: ${{ env.SOURCE_RUN_ID }}
       - name: Verify exact release assets
         run: ./scripts/verify-release-assets.sh dist 0.1.0
       - name: Authenticate to GHCR with the job token
@@ -460,7 +320,7 @@ jobs:
               --artifact-type application/vnd.dekopon.provider.source.v1 \
               --annotation "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
               --annotation "org.opencontainers.image.version=$VERSION" \
-              --annotation "org.opencontainers.image.revision=$GITHUB_SHA" \
+              --annotation "org.opencontainers.image.revision=$RELEASE_SHA" \
               --annotation "org.opencontainers.image.licenses=LGPL-3.0-only" \
               --annotation "org.dekopon.release.run=$run" \
               --annotation "org.dekopon.release.url=https://github.com/$GITHUB_REPOSITORY/releases/tag/v$VERSION" \
@@ -489,7 +349,7 @@ jobs:
           "$RUNNER_TEMP/oras-bin" manifest fetch \
             "$SOURCE_OCI_REPOSITORY@$source_digest" >"$RUNNER_TEMP/source-manifest.json"
           ./scripts/verify-oci-manifest.py source "$RUNNER_TEMP/source-manifest.json" \
-            dist "$run" "$GITHUB_SHA"
+            dist "$run" "$RELEASE_SHA"
           set_package_visibility provider-python-source public
 
           # The source package must already be independently accessible and byte-exact without any
@@ -501,7 +361,7 @@ jobs:
           env -u GH_TOKEN -u GITHUB_TOKEN "$RUNNER_TEMP/oras-bin" manifest fetch "$source_ref" \
             >"$RUNNER_TEMP/anonymous-source-before-provider.json"
           ./scripts/verify-oci-manifest.py source \
-            "$RUNNER_TEMP/anonymous-source-before-provider.json" dist "$run" "$GITHUB_SHA"
+            "$RUNNER_TEMP/anonymous-source-before-provider.json" dist "$run" "$RELEASE_SHA"
           env -u GH_TOKEN -u GITHUB_TOKEN "$RUNNER_TEMP/oras-bin" pull "$source_ref" \
             --output "$RUNNER_TEMP/anonymous-source-before-provider"
           cp dist/python-provider.wasm "$RUNNER_TEMP/anonymous-source-before-provider/"
@@ -530,7 +390,7 @@ jobs:
               --artifact-type application/vnd.dekopon.provider.v1+wasm \
               --annotation "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
               --annotation "org.opencontainers.image.version=$VERSION" \
-              --annotation "org.opencontainers.image.revision=$GITHUB_SHA" \
+              --annotation "org.opencontainers.image.revision=$RELEASE_SHA" \
               --annotation "org.opencontainers.image.licenses=LGPL-3.0-only" \
               --annotation "org.dekopon.release.run=$run" \
               --annotation "org.dekopon.release.url=https://github.com/$GITHUB_REPOSITORY/releases/tag/v$VERSION" \
@@ -547,7 +407,7 @@ jobs:
           "$RUNNER_TEMP/oras-bin" manifest fetch \
             "$OCI_REPOSITORY@$provider_digest" >"$RUNNER_TEMP/provider-manifest.json"
           ./scripts/verify-oci-manifest.py provider "$RUNNER_TEMP/provider-manifest.json" \
-            dist "$run" "$GITHUB_SHA" "$source_digest"
+            dist "$run" "$RELEASE_SHA" "$source_digest"
           set_package_visibility provider-python public
 
           docker logout ghcr.io
@@ -559,11 +419,11 @@ jobs:
           env -u GH_TOKEN -u GITHUB_TOKEN "$RUNNER_TEMP/oras-bin" manifest fetch "$source_ref" \
             >"$RUNNER_TEMP/anonymous-source.json"
           ./scripts/verify-oci-manifest.py source "$RUNNER_TEMP/anonymous-source.json" \
-            dist "$run" "$GITHUB_SHA"
+            dist "$run" "$RELEASE_SHA"
           env -u GH_TOKEN -u GITHUB_TOKEN "$RUNNER_TEMP/oras-bin" manifest fetch "$provider_ref" \
             >"$RUNNER_TEMP/anonymous-provider.json"
           ./scripts/verify-oci-manifest.py provider "$RUNNER_TEMP/anonymous-provider.json" \
-            dist "$run" "$GITHUB_SHA" "$source_digest"
+            dist "$run" "$RELEASE_SHA" "$source_digest"
           env -u GH_TOKEN -u GITHUB_TOKEN "$RUNNER_TEMP/oras-bin" pull "$source_ref" \
             --output "$RUNNER_TEMP/anonymous-source"
           env -u GH_TOKEN -u GITHUB_TOKEN "$RUNNER_TEMP/oras-bin" pull "$provider_ref" \
@@ -581,6 +441,7 @@ jobs:
     needs: [build, draft, ghcr]
     runs-on: ubuntu-24.04
     permissions:
+      actions: read
       contents: write
     env:
       GH_REPO: ${{ github.repository }}
@@ -588,12 +449,15 @@ jobs:
       - name: Check out verification scripts without credentials
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          ref: v0.1.0
           persist-credentials: false
       - name: Download exact release assets
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: release-assets
           path: dist
+          github-token: ${{ github.token }}
+          run-id: ${{ env.SOURCE_RUN_ID }}
       - name: Verify exact assets and install pinned ORAS
         shell: bash
         run: |
@@ -639,11 +503,11 @@ jobs:
           env -u GH_TOKEN -u GITHUB_TOKEN "$RUNNER_TEMP/oras-bin" manifest fetch "$source_ref" \
             >"$RUNNER_TEMP/final-source.json"
           ./scripts/verify-oci-manifest.py source "$RUNNER_TEMP/final-source.json" \
-            dist "$run" "$GITHUB_SHA"
+            dist "$run" "$RELEASE_SHA"
           env -u GH_TOKEN -u GITHUB_TOKEN "$RUNNER_TEMP/oras-bin" manifest fetch "$provider_ref" \
             >"$RUNNER_TEMP/final-provider.json"
           ./scripts/verify-oci-manifest.py provider "$RUNNER_TEMP/final-provider.json" \
-            dist "$run" "$GITHUB_SHA" "$SOURCE_DIGEST"
+            dist "$run" "$RELEASE_SHA" "$SOURCE_DIGEST"
           mkdir "$RUNNER_TEMP/final-source" "$RUNNER_TEMP/final-provider"
           env -u GH_TOKEN -u GITHUB_TOKEN "$RUNNER_TEMP/oras-bin" pull "$source_ref" \
             --output "$RUNNER_TEMP/final-source"
@@ -699,6 +563,7 @@ jobs:
       - name: Check out verification scripts without credentials
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          ref: v0.1.0
           persist-credentials: false
       - name: Install pinned ORAS
         shell: bash
@@ -743,11 +608,11 @@ jobs:
           env -u GH_TOKEN -u GITHUB_TOKEN "$RUNNER_TEMP/oras" manifest fetch \
             "$SOURCE_OCI_REPOSITORY:$VERSION" >source-manifest.json
           ./scripts/verify-oci-manifest.py source source-manifest.json \
-            release "$run" "$GITHUB_SHA"
+            release "$run" "$RELEASE_SHA"
           env -u GH_TOKEN -u GITHUB_TOKEN "$RUNNER_TEMP/oras" manifest fetch \
             "$OCI_REPOSITORY:$VERSION" >provider-manifest.json
           ./scripts/verify-oci-manifest.py provider provider-manifest.json \
-            release "$run" "$GITHUB_SHA" "$SOURCE_DIGEST"
+            release "$run" "$RELEASE_SHA" "$SOURCE_DIGEST"
           env -u GH_TOKEN -u GITHUB_TOKEN "$RUNNER_TEMP/oras" pull \
             "$OCI_REPOSITORY:$VERSION" --output provider
           env -u GH_TOKEN -u GITHUB_TOKEN "$RUNNER_TEMP/oras" pull \
@@ -797,7 +662,7 @@ jobs:
         run: |
           set -euo pipefail
           run="$GITHUB_RUN_ID:$GITHUB_RUN_ATTEMPT"
-          expected_marker="provider-python-run:$GITHUB_RUN_ID:$GITHUB_RUN_ATTEMPT"
+          expected_marker="provider-python-run:$SOURCE_RUN_ID:1"
           [[ -z "$MARKER" || "$MARKER" == "$expected_marker" ]]
           [[ -z "$PROVIDER_DIGEST" || "$PROVIDER_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
           [[ -z "$SOURCE_DIGEST" || "$SOURCE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
