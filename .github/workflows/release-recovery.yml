@@ -190,7 +190,7 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       actions: read
-      contents: read
+      contents: write
       packages: write
     outputs:
       provider_manifest_digest: ${{ steps.publish.outputs.provider_manifest_digest }}

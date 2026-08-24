@@ -333,7 +333,7 @@ jobs:
     needs: [build, draft]
     runs-on: ubuntu-24.04
     permissions:
-      contents: read
+      contents: write
       packages: write
     outputs:
       provider_manifest_digest: ${{ steps.publish.outputs.provider_manifest_digest }}
