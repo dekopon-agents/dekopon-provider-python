@@ -9,10 +9,10 @@ source "$root/scripts/lib-release-assets.sh"
 # shellcheck source=lib-sha256.sh
 # shellcheck disable=SC1091
 source "$root/scripts/lib-sha256.sh"
-version=${1:-0.1.0}
+version=${1:-$(release_package_version "$root")}
 out=${2:-"$root/dist"}
 release_version_is_valid "$version" || {
-  echo "error: only immutable release version 0.1.0 is supported" >&2
+  echo "error: release version must be exact semver: $version" >&2
   exit 1
 }
 actual_version=$(cargo metadata --locked --no-deps --format-version 1 |
@@ -51,5 +51,5 @@ cp \
   done < <(release_asset_names "$version")
 )
 "$root/scripts/verify-release-assets.sh" "$out" "$version"
-printf 'prepared %s immutable release assets in %s\n' \
-  "$(release_asset_names "$version" | wc -l | tr -d ' ')" "$out"
+printf 'prepared %s immutable v%s release assets in %s\n' \
+  "$(release_asset_names "$version" | wc -l | tr -d ' ')" "$version" "$out"

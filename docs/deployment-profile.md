@@ -1,7 +1,7 @@
-# Deployment profile (v0.1.0 release candidate)
+# Deployment profile
 
 This profile separates guest-enforced data bounds from host-enforced execution termination. It is
-for the exact locked Rust 1.97.0 / wasm-tools 1.236.1 artifact and must be regenerated after a
+for the exact locked Rust 1.98.1 / wasm-tools 1.259.0 artifact and must be regenerated after a
 source, lockfile, compiler, or componentizer change.
 
 ## Selected host settings
@@ -23,36 +23,31 @@ The broker's default 2 MiB frame exceeds the required output-plus-64-KiB margin;
 maximum is 16 MiB. `hostLimits` is all-or-nothing global configuration. Per-capability policy may
 narrow timeout/output/HTTP/storage, but not memory or fuel.
 
-Immediate CLI tests use 500,000,000 fuel, 5,000 ms, 64 MiB per memory, and 786,432 output bytes.
-The immediate host's 10,000,000-fuel default is intentionally tested as a safe failure and is not a
-working profile for RustPython startup.
+`tests/broker.rs` drives the real broker host at 1,000,000,000 fuel, 5,000 ms, 64 MiB per memory,
+and 786,432 output bytes. The immediate host's 10,000,000-fuel default, and 50,000,000, are
+intentionally asserted as safe failures and are not working profiles for RustPython startup.
 
 ## Measured artifact
 
-Measured on the final review build with Rust 1.97.0, wasm-tools 1.236.1, and `dekopon-run 0.11.1`
-on an Apple-silicon Mac (2026-08-23):
+Measured on the v0.2.0 build with Rust 1.98.1 and wasm-tools 1.259.0 (2026-09-12). The component
+bytes are reproducible, so every checkout at this commit measures the same sizes and digest:
 
 | Measurement | Result |
 |---|---:|
-| raw core | 20,305,415 bytes |
-| component | 20,305,095 bytes |
-| SHA-256 | `56e8a97a939687165b8a64edc9dc4373a1cbb4c64823923659c0dd627df703a1` |
+| raw core | 20,308,423 bytes |
+| component | 20,308,271 bytes |
+| SHA-256 | `d2a8c88166e3fc0790ecfb45870f9039fae1f70ddd078b72b26731539889f3d7` |
 | component/core imports | 0 / 0 |
 | core memories | 1, minimum 150 pages (9,830,400 bytes), host-capped |
-| core tables | 1, fixed 6,015 funcrefs |
+| core tables | 1, fixed 6,017 funcrefs |
+| 10,000,000 fuel | `OutOfFuel` during startup |
 | 50,000,000 fuel | `OutOfFuel` during startup |
-| 100,000,000 / 250,000,000 fuel | `OutOfFuel` during eager policy initialization |
-| 500,000,000 fuel | normal `result = 2` success |
-| repeated warm calls at 500M | 45.95–51.54 ms; 47.62–48.21 ms run means |
-| cold CLI process (two runs) | 1.93–2.08 s real |
-| cold maximum resident set size (`time -l`) | 580,845,568–591,495,168 bytes |
-| cold Darwin peak-memory-footprint counter | 431,489,912–436,568,856 bytes |
+| 1,000,000,000 fuel | normal `result = 2` success |
 
 `./scripts/measure-final-artifact.sh python-provider.wasm` writes the machine-readable record to
-`/tmp/dekopon-python-measurements.json`, captures raw core declarations, repeats the fuel bracket,
-and measures cold/warm execution. CI uploads that record with its ignored review artifact. The
-older feasibility baseline (23.3 MB, 2.13 s cold CLI, 567,230,464-byte peak host RSS) is superseded
-for this source tree and was never a release quota.
+`/tmp/dekopon-python-measurements.json` and captures raw core declarations; CI uploads that record
+with its ignored review artifact. The fuel bracket in the table is asserted against the real broker
+host by `tests/broker.rs`, not by the measurement script.
 
 ## Admission and process memory
 
@@ -61,8 +56,10 @@ absent and reserves one `maxMemoryBytes` unit per live store; it does not accoun
 compiled code, Cranelift/component compilation, or host allocations. Compilation is also outside
 fuel and invocation deadlines.
 
-The measured single cold compiler process reached up to roughly 591 MB RSS. Until
-platform-specific RSS and concurrency load tests establish a tighter number, budget at least
+A single cold compiler process was measured at up to roughly 591 MB RSS on the v0.1.0 build, when
+a command-line host still existed to measure it under `/usr/bin/time`. The component has grown by
+about 3 KB since, so that figure still bounds this build. Until platform-specific RSS and
+concurrency load tests establish a tighter number, budget at least
 **768 MiB plus admitted concurrent guest reservations** for one compiler/connection profile; do
 not derive a container limit from the 64 MiB store ceiling alone.
 
@@ -73,5 +70,5 @@ not derive a container limit from the 64 MiB store ceiling alone.
 5. keep connection count low enough that concurrent cold compilation cannot OOM the process.
 
 RPi latency and aggregate concurrency are deployment measurements, not inferred from the Mac
-measurement. The owner has accepted the v0.1.0 LGPL distribution decision; RPi measurements do not
+measurement. The owner has accepted the LGPL distribution decision; RPi measurements do not
 reopen it or hold publication. They remain a separate production-deployment/admission gate.

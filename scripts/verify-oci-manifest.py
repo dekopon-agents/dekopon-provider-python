@@ -8,18 +8,36 @@ import json
 import pathlib
 import re
 import sys
+import tomllib
 
-VERSION = "0.1.0"
-SOURCE_ARCHIVE = "dekopon-python-provider-0.1.0-relink-source.tar.gz"
+REPOSITORY_ROOT = pathlib.Path(__file__).resolve().parent.parent
 SOURCE_REPOSITORY = "ghcr.io/dekopon-agents/provider-python-source"
 PROVIDER_REPOSITORY = "ghcr.io/dekopon-agents/provider-python"
-RELEASE = "https://github.com/dekopon-agents/dekopon-provider-python/releases/tag/v0.1.0"
 OCI_LICENSES = "LGPL-3.0-only"
+
+
+def package_version() -> str:
+    """Read the released version from the checkout the manifest was published from."""
+    manifest = tomllib.loads((REPOSITORY_ROOT / "Cargo.toml").read_text(encoding="utf-8"))
+    package = manifest["package"]
+    if package["name"] != "dekopon-python-provider":
+        raise SystemExit(f"error: unexpected package {package['name']}")
+    version = package["version"]
+    if not re.fullmatch(r"[0-9]+[.][0-9]+[.][0-9]+", version):
+        raise SystemExit(f"error: unexpected package version {version}")
+    return version
+
+
+VERSION = package_version()
+SOURCE_ARCHIVE = f"dekopon-python-provider-{VERSION}-relink-source.tar.gz"
+RELEASE = (
+    "https://github.com/dekopon-agents/dekopon-provider-python/releases/tag/v" + VERSION
+)
 SOURCE_MEDIA = {
     "python-provider.wasm.sha256": "text/plain",
     SOURCE_ARCHIVE: "application/gzip",
     f"{SOURCE_ARCHIVE}.sha256": "text/plain",
-    "dekopon-python-provider-0.1.0.cdx.json": "application/vnd.cyclonedx+json",
+    f"dekopon-python-provider-{VERSION}.cdx.json": "application/vnd.cyclonedx+json",
     "THIRD_PARTY_NOTICES.md": "text/markdown",
     "RELEASE_COMPLIANCE.md": "text/markdown",
     "RELINKING.md": "text/markdown",

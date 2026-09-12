@@ -42,7 +42,7 @@ allow = [
   "Zlib",
   "bzip2-1.0.6",
 ]
-# Owner-accepted, provider-local v0.1.0 exceptions. These exact package/version entries are paired
+# Owner-accepted, provider-local exceptions. These exact package/version entries are paired
 # with complete corresponding source and relink instructions; they are intentionally not a blanket
 # LGPL allow and do not alter the separate Dekopon core repository policy.
 exceptions = [

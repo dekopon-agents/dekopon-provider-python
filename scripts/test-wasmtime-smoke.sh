@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 component=${1:?usage: test-wasmtime-smoke.sh <component.wasm>}
-test "$(wasmtime --version)" = "wasmtime 48.0.0"
+# `cargo install wasmtime-cli` prints the bare version; a released binary appends its commit.
+[[ "$(wasmtime --version)" == "wasmtime 48.0.2"* ]]
 
 wasmtime run --invoke 'describe()' "$component" \
   | jq -r . \

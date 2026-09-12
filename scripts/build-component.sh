@@ -6,10 +6,13 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -L)
 # Resolved from this script's absolute repository root.
 # shellcheck disable=SC1091
 source "$root/scripts/lib-sha256.sh"
+# shellcheck source=lib-release-assets.sh
+# shellcheck disable=SC1091
+source "$root/scripts/lib-release-assets.sh"
 component=${1:-"$root/python-provider.wasm"}
-required_rust="1.97.0"
-required_rustc="rustc 1.97.0 (2d8144b78 2026-07-07)"
-required_wasm_tools="1.236.1"
+required_rust="1.98.1"
+required_rustc="rustc 1.98.1 (48a229cea 2026-09-01)"
+required_wasm_tools="1.259.0"
 
 [[ "$(rustup run "$required_rust" rustc --version)" == "$required_rustc" ]] || {
   echo "error: expected $required_rustc" >&2
@@ -180,7 +183,7 @@ cargo=("$root/.canonical-bin/cargo" +"$required_rust")
   --target wasm32-unknown-unknown \
   --release \
   -- \
-  -C metadata=dekopon-python-provider-0.1.0-repro-v1 \
+  -C "metadata=dekopon-python-provider-$(release_package_version "$root")-repro-v1" \
   -C extra-filename=
 
 wasm-tools validate "$core"

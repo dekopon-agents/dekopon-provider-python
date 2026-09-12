@@ -43,7 +43,7 @@ done
 for term in \
   LGPL-3.0-only LGPL-2.1-or-later Python-2.0.1 PSF Unicode BSD \
   'combined WebAssembly component' 'corresponding-source' 'modify/replace Malachite' \
-  'owner' 'does not claim attorney review' 'provider-python-source:0.1.0' 'MIT OR Apache-2.0'; do
+  'owner' 'does not claim attorney review' 'provider-python-source:<version>' 'MIT OR Apache-2.0'; do
   grep -Fiq "$term" "$notices" || {
     echo "error: notices do not cover $term" >&2
     exit 1

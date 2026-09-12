@@ -9,7 +9,7 @@ source "$root/scripts/lib-release-assets.sh"
 # shellcheck source=lib-sha256.sh
 # shellcheck disable=SC1091
 source "$root/scripts/lib-sha256.sh"
-version=0.1.0
+version=$(release_package_version "$root")
 archive=$(release_source_archive "$version")
 sbom=$(release_sbom "$version")
 reference=${1:-}
