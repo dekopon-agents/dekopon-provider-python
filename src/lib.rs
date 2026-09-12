@@ -13,8 +13,8 @@ mod value;
 mod yaml;
 
 use dekopon_provider_sdk::{
-    CapabilityId, EffectKind, Idempotency, Provider, ProviderApiVersion, ProviderCapability,
-    ProviderError, ProviderManifest, RiskLevel,
+    CapabilityId, EffectKind, Provider, ProviderApiVersion, ProviderCapability, ProviderError,
+    ProviderManifest, RiskLevel,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -45,7 +45,6 @@ impl Provider for PythonProvider {
                     .to_owned(),
                 effect: EffectKind::ReadOnly,
                 risk: RiskLevel::High,
-                idempotency: Idempotency::Idempotent,
                 input_schema: json!({
                     "type": "object",
                     "properties": {
@@ -89,7 +88,7 @@ dekopon_provider_sdk::export_provider!(PythonProvider);
 
 #[cfg(test)]
 mod tests {
-    use dekopon_provider_sdk::{EffectKind, Idempotency, Provider, RiskLevel};
+    use dekopon_provider_sdk::{EffectKind, Provider, RiskLevel};
     use serde_json::json;
 
     use super::{PythonProvider, SCRIPT_BYTES};
@@ -112,7 +111,6 @@ mod tests {
         assert_eq!(capability.id.as_str(), "python.eval");
         assert_eq!(capability.effect, EffectKind::ReadOnly);
         assert_eq!(capability.risk, RiskLevel::High);
-        assert_eq!(capability.idempotency, Idempotency::Idempotent);
         assert_eq!(capability.input_schema["additionalProperties"], false);
         assert_eq!(
             capability.input_schema["properties"]["script"]["maxLength"],

@@ -7,8 +7,8 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # shellcheck disable=SC1091
 source "$root/scripts/lib-sha256.sh"
 out=${1:-"$root/dist"}
-required_rust=1.97.0
-required_rustc='rustc 1.97.0 (2d8144b78 2026-07-07)'
+required_rust=1.98.1
+required_rustc='rustc 1.98.1 (48a229cea 2026-09-01)'
 required_cyclonedx=0.5.9
 
 [[ "$(rustup run "$required_rust" rustc --version)" == "$required_rustc" ]] || {
@@ -32,8 +32,8 @@ package = tomllib.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))["
 print(package["name"], package["version"])
 PY
 )
-[[ "$package" == dekopon-python-provider && "$version" == 0.1.0 ]] || {
-  echo "error: immutable source bundle expects dekopon-python-provider 0.1.0" >&2
+[[ "$package" == dekopon-python-provider && "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+  echo "error: source bundle expects dekopon-python-provider at an exact version" >&2
   exit 1
 }
 revision=$(git -C "$root" rev-parse HEAD)
@@ -118,9 +118,9 @@ manifest = {
     "gitRevision": revision,
     "archive": archive,
     "sbom": sbom_name,
-    "rustToolchain": "1.97.0",
+    "rustToolchain": "1.98.1",
     "wasmTarget": "wasm32-unknown-unknown",
-    "wasmTools": "1.236.1",
+    "wasmTools": "1.259.0",
     "cargoCycloneDx": "0.5.9",
     "lockedPackageCount": len(packages),
     "vendoredRegistryPackageCount": len(registry),

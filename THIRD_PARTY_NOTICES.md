@@ -7,14 +7,14 @@ The distributed `python-provider.wasm` is a combined WebAssembly component that 
 third-party code, including the four **LGPL-3.0-only** Malachite 0.9.2 packages below. The
 permissive license on original project source does not replace those embedded-code terms.
 
-Every v0.1.0 binary copy is paired, at no charge and without authentication, with the exact
+Every binary copy is paired, at no charge and without authentication, with the exact
 corresponding-source/relink archive, its SHA-256, a CycloneDX SBOM, this notice, relinking
-instructions, and verbatim GNU license texts. Obtain them from the `v0.1.0` GitHub Release or
-`ghcr.io/dekopon-agents/provider-python-source:0.1.0`; see `RELINKING.md`. The archive permits a
+instructions, and verbatim GNU license texts. Obtain them from the matching `v<version>` GitHub
+Release or `ghcr.io/dekopon-agents/provider-python-source:<version>`; see `RELINKING.md`. The archive permits a
 recipient to modify/replace Malachite and rebuild/componentize a modified provider from complete
 offline dependency source. No `latest` tag is published.
 
-This inventory records the repository owner's accepted v0.1.0 license-policy design. It is not
+This inventory records the repository owner's accepted license-policy design. It is not
 legal advice, does not claim attorney review, and does not alter the permissive-only policy of the
 separate Dekopon core repository.
 

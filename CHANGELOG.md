@@ -1,6 +1,18 @@
 # Changelog
 
-## 0.1.0 - Unreleased
+## 0.2.0 - Unreleased
+
+- Move to `dekopon-provider-sdk` 0.13.0 and `dekopon:provider@0.3.0`. The retired `idempotency`
+  capability classification is gone from the manifest, so an 0.11-era host will not load this
+  component and an 0.13 host will not load the 0.1.0 one.
+- Build on Rust 1.98.1 with wasm-tools 1.259.0 and verify against Wasmtime 48.0.2.
+- Retire `dekopon-run`, which stops at 0.11.1 and requires the removed manifest field. Protocol,
+  sandbox, YAML-policy, and host-termination coverage now runs against the real broker host
+  through `dekopon-provider-sdk-testkit`'s `FakeBroker` in `tests/broker.rs`.
+- Derive the release version from `Cargo.toml` and the pushed tag throughout the release workflow
+  and the asset, bundle, and OCI-manifest scripts, instead of pinning them to one shipped release.
+
+## 0.1.0 - 2026-08-24
 
 - Add the import-free `python.eval` capability with a fresh exact RustPython 0.5.0 VM per call.
 - Guarantee bounded stdout and safe JSON-shaped results, structured script errors, `json`, `re`,
@@ -16,5 +28,5 @@
 - Publish the deliberately expanded compliance asset set through the GitHub Release and a linked
   public version-only source OCI artifact while preserving the provider OCI as one Wasm layer.
 
-The v0.1.0 license-policy decision is complete. Publication still requires the repository variable,
+The license-policy decision is complete. Publication still requires the repository variable,
 immutable annotated tag, remote, and all transactional release gates in `RELEASE_COMPLIANCE.md`.

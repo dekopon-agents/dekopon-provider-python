@@ -1,18 +1,20 @@
 # Dekopon Python provider
 
 An import-free WebAssembly component exposing one read-only, High-risk capability:
-`python.eval`. Version 0.1.0 embeds **RustPython 0.5.0 exactly**, creates a fresh interpreter per
-call, captures bounded stdout in Rust, and returns only a bounded JSON-shaped result.
+`python.eval`. It embeds **RustPython 0.5.0 exactly**, creates a fresh interpreter per call,
+captures bounded stdout in Rust, and returns only a bounded JSON-shaped result. Version 0.2.0
+targets `dekopon-provider-sdk` 0.13.0 and `dekopon:provider@0.3.0`; an 0.11-era host will not load
+it.
 
-> **Release status: v0.1.0 owner-approved; mechanical publication interlock remains.** The owner
-> accepted the exact LGPL dependencies and corresponding-source/relink design for this standalone
-> optional provider. This records a project policy choice, not attorney review. Publication still
-> requires the per-repository variable `PROVIDER_PYTHON_RELEASE_APPROVED=true`, an annotated tag,
-> and every transactional release check in `RELEASE_COMPLIANCE.md`.
+> **Release status: owner-approved; mechanical publication interlock remains.** The owner accepted
+> the exact LGPL dependencies and corresponding-source/relink design for this standalone optional
+> provider. This records a project policy choice, not attorney review. Publication still requires
+> the per-repository variable `PROVIDER_PYTHON_RELEASE_APPROVED=true`, an annotated tag, and every
+> transactional release check in `RELEASE_COMPLIANCE.md`.
 
 ## Build
 
-Required versions are Rust 1.97.0, target `wasm32-unknown-unknown`, wasm-tools 1.236.1, and
+Required versions are Rust 1.98.1, target `wasm32-unknown-unknown`, wasm-tools 1.259.0, and
 cargo-cyclonedx 0.5.9 when producing release source/SBOM assets. The component and all compliance
 artifacts are generated and ignored; they must never be committed.
 
@@ -40,40 +42,54 @@ complete versioned source of every Cargo dependency and an offline source replac
 verify it with pinned `cargo-cyclonedx` 0.5.9:
 
 ```console
+version=$(cargo metadata --locked --no-deps --format-version 1 |
+  jq -er '.packages[] | select(.name == "dekopon-python-provider") | .version')
 ./scripts/build-source-bundle.sh dist
 ./scripts/test-source-bundle-reproducibility.sh dist
 ./scripts/test-source-bundle-relink.sh \
-  dist/dekopon-python-provider-0.1.0-relink-source.tar.gz \
-  dist/dekopon-python-provider-0.1.0.cdx.json
+  "dist/dekopon-python-provider-$version-relink-source.tar.gz" \
+  "dist/dekopon-python-provider-$version.cdx.json"
 ```
 
 See [RELINKING.md](RELINKING.md) for recipient modification, rebuild, componentization, and
 installation instructions. Generated archives, SBOMs, vendor trees, checksums, temporary build
 trees, and Wasm remain ignored and absent from Git.
 
-## Exact CLI use
+## Running it
 
-RustPython VM startup needs more than Dekopon immediate mode's 10,000,000-fuel default. Always name
-the dedicated profile explicitly:
+There is no command-line host for this component. Two things can run it.
+
+The component has zero imports, so Wasmtime executes it directly. This is the quickest check that a
+build works, and it is what `scripts/test-wasmtime-smoke.sh` does:
 
 ```console
-dekopon-run inspect \
-  --max-memory-bytes 67108864 \
-  --max-input-bytes 1048576 \
-  --max-output-bytes 1048576 \
-  --fuel 500000000 \
-  --timeout-ms 5000 \
-  --provider ./python-provider.wasm
+wasmtime run --invoke 'describe()' ./python-provider.wasm
+wasmtime run \
+  --invoke 'invoke("python.eval", "{\"script\":\"result = sum(i * i for i in range(5))\"}")' \
+  ./python-provider.wasm
+```
 
-dekopon-run invoke \
-  --max-memory-bytes 67108864 \
-  --max-input-bytes 1048576 \
-  --max-output-bytes 786432 \
-  --fuel 500000000 \
-  --timeout-ms 5000 \
-  --provider ./python-provider.wasm \
-  python.eval \
-  --input '{"script":"result = sum(i * i for i in range(5))"}'
+That applies none of the fuel, deadline, or memory limits the component depends on. For the real
+broker host with the selected profile, use `dekopon-provider-sdk-testkit`'s `FakeBroker`, as
+`tests/broker.rs` does throughout:
+
+```rust
+let broker = FakeBroker::builder()
+    .component("python-provider.wasm")
+    .provider("python")
+    .host_limits(BrokerHostLimits {
+        max_memory_bytes: 64 * 1024 * 1024,
+        fuel: 1_000_000_000,
+        max_timeout: Duration::from_secs(5),
+        ..BrokerHostLimits::default()
+    })
+    .timeout_ms(5_000)
+    .max_output_bytes(786_432)
+    .build()
+    .await?;
+let output = broker
+    .invoke("python.eval", json!({"script": "result = sum(i * i for i in range(5))"}))
+    .await?;
 ```
 
 Expected capability output:
@@ -87,24 +103,9 @@ Expected capability output:
 }
 ```
 
-`dekopon-run` wraps this under its provider/capability/timing JSON. With the unmodified immediate
-10,000,000-fuel default, invocation fails safely with a host `OutOfFuel` error; that profile is not
-supported for this component.
-
-For multiline source, avoid shell escaping:
-
-```console
-cat > /tmp/python-eval.json <<'JSON'
-{
-  "script": "import json\nprint('Python 3')\nresult = json.loads('{\"answer\": 42}')"
-}
-JSON
-
-dekopon-run invoke \
-  --provider ./python-provider.wasm \
-  --fuel 500000000 --timeout-ms 5000 --max-output-bytes 786432 \
-  python.eval --input-file /tmp/python-eval.json
-```
+RustPython VM startup needs far more than Dekopon immediate mode's 10,000,000-fuel default; under
+that default the invocation fails safely with a host `OutOfFuel` error. Name the dedicated profile
+above explicitly.
 
 ## API
 
@@ -198,13 +199,12 @@ commands, persistence, and privileged imports are deliberately absent.
 ## Validation
 
 ```console
-cargo +1.97.0 fmt --all -- --check
-cargo +1.97.0 clippy --locked --all-targets -- -D warnings
-cargo +1.97.0 test --locked --all-targets
-cargo +1.93.0 check --locked --all-targets
+cargo +1.98.1 fmt --all -- --check
+cargo +1.98.1 clippy --locked --all-targets -- -D warnings
+cargo +1.98.1 test --locked --all-targets
 cargo deny check licenses advisories bans sources
 ./scripts/validate.sh
-./scripts/prepare-release-assets.sh 0.1.0 dist
+./scripts/prepare-release-assets.sh
 ./scripts/test-source-bundle-reproducibility.sh dist
 ./scripts/test-source-bundle-relink.sh
 ```
@@ -220,5 +220,5 @@ checksums are in `THIRD_PARTY_NOTICES.md`; verbatim GNU texts are in `LICENSE-LG
 
 Every binary release provides freely accessible exact corresponding source and relinking material
 both as GitHub Release assets and at
-`ghcr.io/dekopon-agents/provider-python-source:0.1.0`. See `RELINKING.md`. No `latest` tag is
+`ghcr.io/dekopon-agents/provider-python-source:<version>`. See `RELINKING.md`. No `latest` tag is
 published.

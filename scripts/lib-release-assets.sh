@@ -1,8 +1,20 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash
 
+# The release version is whatever Cargo.toml declares; a tag, an asset name, and an OCI tag are
+# all derived from it rather than pinned to one shipped release.
+release_package_version() {
+  python3 - "${1:-$root}/Cargo.toml" <<'PYTHON'
+import pathlib, sys, tomllib
+package = tomllib.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))["package"]
+if package["name"] != "dekopon-python-provider":
+    raise SystemExit(f"error: unexpected package {package['name']}")
+print(package["version"])
+PYTHON
+}
+
 release_version_is_valid() {
-  [[ ${1:-} == 0.1.0 ]]
+  [[ ${1:-} =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
 }
 
 release_source_archive() {

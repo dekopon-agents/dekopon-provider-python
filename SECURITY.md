@@ -2,9 +2,9 @@
 
 ## Supported version
 
-Security fixes are accepted for the 0.1.x line. The owner has accepted the exact LGPL-3.0-only
-Malachite packages and the corresponding-source/relinkability design for this standalone optional
-provider's v0.1.0 release. That is a project policy decision, not a claim of attorney review. The
+Security fixes are accepted for the newest released minor line. The owner has accepted the exact
+LGPL-3.0-only Malachite packages and the corresponding-source/relinkability design for this
+standalone optional provider. That is a project policy decision, not a claim of attorney review. The
 repository variable and immutable release gates remain mechanical publication controls.
 
 Report suspected vulnerabilities privately through GitHub's security-advisory interface for

@@ -10,9 +10,9 @@ source "$root/scripts/lib-release-assets.sh"
 # shellcheck disable=SC1091
 source "$root/scripts/lib-sha256.sh"
 directory=${1:-"$root/dist"}
-version=${2:-0.1.0}
+version=${2:-$(release_package_version "$root")}
 release_version_is_valid "$version" || {
-  echo 'error: unsupported release version' >&2
+  echo "error: release version must be exact semver: $version" >&2
   exit 1
 }
 [[ -d "$directory" ]] || { echo "error: missing asset directory $directory" >&2; exit 1; }

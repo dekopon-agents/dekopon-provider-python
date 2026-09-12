@@ -25,8 +25,15 @@ for workflow in "$root/.github/workflows/ci.yml" "$root/.github/workflows/releas
 done
 
 release="$root/.github/workflows/release.yml"
+version=$(release_package_version "$root")
+release_version_is_valid "$version" || {
+  echo "error: package version must be exact semver: $version" >&2
+  exit 1
+}
 for required in \
-  'v0.1.0' \
+  '- "v*"' \
+  'test "$GITHUB_REF_NAME" = "v$version"' \
+  'actions/attest-build-provenance' \
   'PROVIDER_PYTHON_RELEASE_APPROVED' \
   'ghcr.io/dekopon-agents/provider-python' \
   'ghcr.io/dekopon-agents/provider-python-source' \
@@ -51,7 +58,7 @@ for required in \
   'remove only this run' \
   "needs.finalize.result != 'success'" \
   'preserving immutable finalized release after read-only failure'; do
-  grep -Fq "$required" "$release" || {
+  grep -Fq -- "$required" "$release" || {
     echo "error: release workflow lacks $required" >&2
     exit 1
   }
@@ -84,11 +91,18 @@ if grep -Eq 'oras(-bin)?"?[[:space:]]+cp|"\$RUNNER_TEMP/oras(-bin)?"[[:space:]]+
   echo 'error: direct-final publication must not create a second tag for a shared digest' >&2
   exit 1
 fi
-grep -Fq './scripts/prepare-release-assets.sh 0.1.0 dist' \
+# Intentional literal workflow assertion.
+# shellcheck disable=SC2016
+grep -Fq './scripts/prepare-release-assets.sh "$version" dist' \
   "$root/.github/workflows/ci.yml" || {
   echo 'error: regular CI does not prepare the exact release asset set' >&2
   exit 1
 }
+if grep -Eq "(^|[^0-9.])v?${version//./[.]}([^0-9.]|\$)" "$release"; then
+  echo "error: release workflow hardcodes the released version instead of deriving it" >&2
+  grep -En "(^|[^0-9.])v?${version//./[.]}([^0-9.]|\$)" "$release" >&2
+  exit 1
+fi
 
 python3 - "$release" <<'PY'
 import pathlib
@@ -185,18 +199,19 @@ if grep -Eqi 'staging|provider-python(-source)?:(latest|stable)|--tag[ =]+(lates
   exit 1
 fi
 
-asset_count=$(release_asset_names 0.1.0 | wc -l | tr -d ' ')
-source_count=$(source_oci_asset_names 0.1.0 | wc -l | tr -d ' ')
+asset_count=$(release_asset_names "$version" | wc -l | tr -d ' ')
+source_count=$(source_oci_asset_names "$version" | wc -l | tr -d ' ')
 [[ "$asset_count" == 14 && "$source_count" == 13 ]] || {
   echo 'error: immutable release/source asset counts drifted' >&2
   exit 1
 }
+# A versioned asset reaches the workflow as a "$VERSION" expansion rather than a literal name.
 while IFS= read -r asset; do
-  grep -Fq "$asset" "$release" || {
+  grep -Fq "${asset//"$version"/\$VERSION}" "$release" || {
     echo "error: release workflow omits immutable asset $asset" >&2
     exit 1
   }
-done < <(release_asset_names 0.1.0)
+done < <(release_asset_names "$version")
 [[ "$(grep -Fc 'python-provider.wasm:application/wasm' "$release")" -eq 1 ]] || {
   echo 'error: provider OCI must declare exactly one application/wasm layer' >&2
   exit 1

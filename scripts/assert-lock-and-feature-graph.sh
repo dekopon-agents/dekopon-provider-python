@@ -22,7 +22,7 @@ for name in required_rustpython:
     if versions.get(name) != {"0.5.0"}:
         raise SystemExit(f"error: {name} must resolve exactly once at 0.5.0, got {versions.get(name)}")
 required = {
-    "dekopon-provider-sdk": {"0.11.0"},
+    "dekopon-provider-sdk": {"0.13.0"},
     "malachite-base": {"0.9.2"},
     "malachite-bigint": {"0.9.2"},
     "malachite-nz": {"0.9.2"},
@@ -34,7 +34,7 @@ for name, expected in required.items():
     if versions.get(name) != expected:
         raise SystemExit(f"error: {name} must be {expected}, got {versions.get(name)}")
 checksums = {
-    ("dekopon-provider-sdk", "0.11.0"): "40d29d6bfd3f634c6229cf6121b0ae78fb512e1355862ba112d7c5dcf3241e39",
+    ("dekopon-provider-sdk", "0.13.0"): "3744dadb6220a9c0f50ce2ee58ef709d0141b3a1faa4e7bda9ca8beab6e2399b",
     ("malachite-base", "0.9.2"): "a4f44099731f17094b07825c88ccb5fbd1bfa1f82fafff7daa33e8b8652db16e",
     ("malachite-bigint", "0.9.2"): "cc58206ba15e9c406e20c95c5f86efa07b12f94080945908e910b3a0faa23fef",
     ("malachite-nz", "0.9.2"): "a137660cdba20f136c8a223125f08088adb4e0b72fbb8466f08c43e31cc0427d",
@@ -67,7 +67,7 @@ grep -Fq 'paths.sort_by_key(|entry| entry.file_name());' "$patch_source"
 grep -Fq 'map: BTreeMap<String, MemberNurseryEntry>' "$patch_class"
 grep -Fq 'properties.sort_by(' "$patch_class"
 grep -Fq 'py_names.sort();' "$patch_module"
-rustup run 1.97.0 rustfmt --edition 2024 --check \
+rustup run 1.98.1 rustfmt --edition 2024 --check \
   "$patch_source" "$patch_class" "$patch_module"
 if grep -Fq 'collections::HashMap' "$patch_source"; then
   echo 'error: patched py_freeze still uses randomized module ordering' >&2

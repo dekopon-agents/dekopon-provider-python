@@ -8,28 +8,30 @@ Dekopon Python provider source remains **MIT OR Apache-2.0**; those permissive t
 the terms that apply to embedded third-party code. `LICENSE-LGPL-3.0` and `LICENSE-GPL-3.0` contain
 the complete applicable GNU license texts. No attorney review is claimed.
 
-Every v0.1.0 binary distribution is paired with
-`dekopon-python-provider-0.1.0-relink-source.tar.gz`. It contains the exact provider application
+Every binary distribution is paired with
+`dekopon-python-provider-<version>-relink-source.tar.gz`, where `<version>` is that release's exact
+version. It contains the exact provider application
 source and WIT, `Cargo.lock`, build configuration and scripts, notices and license texts, and the
 complete versioned Cargo source for every locked registry dependency. The archive is sufficient to
 change Malachite and rebuild/componentize the provider without fetching a crate.
 
-## Obtain and verify v0.1.0 source
+## Obtain and verify the source for one release
 
 The same bytes are available without authentication from both durable locations:
 
-- the `v0.1.0` GitHub Release at
-  <https://github.com/dekopon-agents/dekopon-provider-python/releases/tag/v0.1.0>;
-- `ghcr.io/dekopon-agents/provider-python-source:0.1.0`, for example with
-  `oras pull ghcr.io/dekopon-agents/provider-python-source:0.1.0`.
+- the `v<version>` GitHub Release at
+  <https://github.com/dekopon-agents/dekopon-provider-python/releases>;
+- `ghcr.io/dekopon-agents/provider-python-source:<version>`, for example with
+  `oras pull ghcr.io/dekopon-agents/provider-python-source:<version>`.
 
 Do not use a `latest` tag; none is published. Verify and unpack:
 
 ```console
+version=<version>
 sha256sum --check --strict \
-  dekopon-python-provider-0.1.0-relink-source.tar.gz.sha256
-tar -xzf dekopon-python-provider-0.1.0-relink-source.tar.gz
-cd dekopon-python-provider-0.1.0
+  "dekopon-python-provider-$version-relink-source.tar.gz.sha256"
+tar -xzf "dekopon-python-provider-$version-relink-source.tar.gz"
+cd "dekopon-python-provider-$version"
 python3 scripts/source-file-manifest.py verify .
 python3 scripts/verify-vendored-source.py .
 ```
@@ -40,12 +42,12 @@ CycloneDX 1.5 SBOM is byte-identical to the copy inside the archive.
 
 ## Pinned prerequisites
 
-Install Rust 1.97.0 with `wasm32-unknown-unknown` and `wasm-tools` 1.236.1 before going offline:
+Install Rust 1.98.1 with `wasm32-unknown-unknown` and `wasm-tools` 1.259.0 before going offline:
 
 ```console
-rustup toolchain install 1.97.0 --profile minimal
-rustup target add wasm32-unknown-unknown --toolchain 1.97.0
-cargo +1.97.0 install wasm-tools --version 1.236.1 --locked
+rustup toolchain install 1.98.1 --profile minimal
+rustup target add wasm32-unknown-unknown --toolchain 1.98.1
+cargo +1.98.1 install wasm-tools --version 1.259.0 --locked
 ```
 
 The checked-in toolchain file and build script reject other Rust or wasm-tools versions. The
@@ -74,7 +76,7 @@ The same process applies to `malachite-bigint-0.9.2`, `malachite-nz-0.9.2`, and
 `malachite-q-0.9.2`. You may make substantive changes, replace files throughout those package
 directories, and refresh each affected checksum. For a structurally different fork, place its
 source in the tree, point a `[patch.crates-io]` entry at that local path, and update `Cargo.lock`
-with `cargo +1.97.0 update --offline`; all build inputs must remain local.
+with `cargo +1.98.1 update --offline`; all build inputs must remain local.
 
 `build-component.sh` compiles the modified graph at a scrubbed canonical path, invokes
 `wasm-tools component new`, validates the result, and proves that the resulting component and its
@@ -83,19 +85,22 @@ not the official release artifact.
 
 ## Install a modified component
 
-No signing key, installation key, or proprietary linker is required. Point a Dekopon 0.11.1 host
-at the rebuilt file and authorize its new digest under your own deployment policy:
+No signing key, installation key, or proprietary linker is required. The component has no imports,
+so any Wasmtime 48.0.2 can exercise it directly before you authorize its new digest under your own
+deployment policy:
 
 ```console
-dekopon-run inspect \
-  --provider ./python-provider.wasm \
-  --fuel 500000000 --timeout-ms 5000 \
-  --max-memory-bytes 67108864 \
-  --max-input-bytes 1048576 --max-output-bytes 1048576
+wasmtime run --invoke 'describe()' ./python-provider.wasm
+wasmtime run \
+  --invoke 'invoke("python.eval", "{\"script\":\"result = 2\"}")' \
+  ./python-provider.wasm
 ```
 
-The resource and security profile in `README.md` and `SECURITY.md` remains necessary. Do not label a
-modified build as the official Dekopon v0.1.0 binary or expect its checksum to match the release.
+That is a bare execution, not a broker: it applies none of the fuel, deadline, or memory limits the
+component depends on. To run it under the real host with those limits, use
+`dekopon-provider-sdk-testkit`'s `FakeBroker`, as `tests/broker.rs` does. The resource and security
+profile in `README.md` and `SECURITY.md` remains necessary. Do not label a modified build as an
+official Dekopon binary or expect its checksum to match a release.
 
 ## Permission and retention
 

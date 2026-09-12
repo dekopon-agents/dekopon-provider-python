@@ -9,7 +9,7 @@ source "$root/scripts/lib-release-assets.sh"
 # shellcheck source=lib-sha256.sh
 # shellcheck disable=SC1091
 source "$root/scripts/lib-sha256.sh"
-version=${VERSION:-0.1.0}
+version=${VERSION:-$(release_package_version "$root")}
 archive=${1:-"$root/dist/$(release_source_archive "$version")"}
 sbom=${2:-"$root/dist/$(release_sbom "$version")"}
 checksum="$archive.sha256"
@@ -36,7 +36,7 @@ python3 "$source_root/scripts/verify-vendored-source.py" "$source_root"
 grep -Fq 'offline = true' "$source_root/.cargo/config.toml"
 (
   cd "$source_root"
-  cargo +1.97.0 metadata --locked --offline --format-version 1 >/dev/null
+  cargo +1.98.1 metadata --locked --offline --format-version 1 >/dev/null
 )
 
 # Exercise the LGPL relinking path, rather than merely rebuilding pristine bytes. A recipient makes

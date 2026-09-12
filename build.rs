@@ -1,7 +1,7 @@
 use std::{env, fs, path::PathBuf};
 
 const PROVIDER_WIT_SHA256: &str =
-    "02ba5a92067f53bc8f48e10bf221229c5b7f33f791a031741da5011c32ab37c9";
+    "eac383801715cc62f41f7267de5c191827cfd2c45c766cda5600cfef2e1c03dd";
 
 fn main() {
     println!("cargo:rerun-if-changed=wit/provider.wit");
@@ -10,7 +10,7 @@ fn main() {
     let actual = sha256(&wit);
     assert_eq!(
         actual, PROVIDER_WIT_SHA256,
-        "wit/provider.wit drifted from dekopon-provider-sdk 0.11.0"
+        "wit/provider.wit drifted from dekopon-provider-sdk 0.13.0"
     );
 }
 
@@ -45,10 +45,10 @@ fn sha256(input: &[u8]) -> String {
         0x1f83d9ab,
         0x5be0cd19,
     ];
-    for chunk in padded.chunks_exact(64) {
+    for chunk in padded.as_chunks::<64>().0 {
         let mut w = [0u32; 64];
-        for (index, bytes) in chunk.chunks_exact(4).enumerate() {
-            w[index] = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+        for (index, bytes) in chunk.as_chunks::<4>().0.iter().enumerate() {
+            w[index] = u32::from_be_bytes(*bytes);
         }
         for index in 16..64 {
             let s0 = w[index - 15].rotate_right(7)
