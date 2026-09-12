@@ -11,6 +11,10 @@
   through `dekopon-provider-sdk-testkit`'s `FakeBroker` in `tests/broker.rs`.
 - Derive the release version from `Cargo.toml` and the pushed tag throughout the release workflow
   and the asset, bundle, and OCI-manifest scripts, instead of pinning them to one shipped release.
+- Delete the package-visibility flip from publication and rollback. It called a GHCR endpoint that
+  does not exist, and only stayed dormant through 0.1.0 because both packages were created by that
+  run. A version is now publicly resolvable between its push and its authentication; cleanup
+  deleting this run's version by digest is what bounds a failed authentication.
 
 ## 0.1.0 - 2026-08-24
 
