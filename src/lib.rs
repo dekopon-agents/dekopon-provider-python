@@ -1,10 +1,14 @@
-//! A single constrained RustPython capability for Dekopon.
+//! A single constrained RustPython capability for Dekopon, and the `python` command word for it.
 //!
 //! The component has no imports. Every invocation creates a fresh VM, captures bounded stdout in
 //! Rust, and projects only an explicitly bounded JSON value model. Resource termination remains a
 //! host responsibility: provider code cannot catch Wasmtime fuel, deadline, or memory traps.
+//!
+//! `run-command` is pure argv parsing in `commands`: it renders help and usage errors or proposes
+//! `python.eval`, and never constructs a VM.
 
 mod capture;
+mod commands;
 mod entropy;
 mod eval;
 mod limits;
@@ -13,13 +17,26 @@ mod value;
 mod yaml;
 
 use dekopon_provider_sdk::{
-    CapabilityId, EffectKind, Provider, ProviderApiVersion, ProviderCapability, ProviderError,
-    ProviderManifest, RiskLevel,
+    CapabilityId, CommandRun, EffectKind, Provider, ProviderApiVersion, ProviderCapability,
+    ProviderError, ProviderManifest, RiskLevel,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::limits::SCRIPT_BYTES;
+
+/// The one capability, named once for the manifest, `invoke`, and the command word.
+pub(crate) const EVAL: &str = "python.eval";
+/// The command word this provider contributes to the sandboxed shell.
+pub(crate) const COMMAND_WORD: &str = "python";
+
+mod bindings {
+    wit_bindgen::generate!({
+        path: "wit",
+        world: "provider-cli",
+        pub_export_macro: true,
+    });
+}
 
 struct PythonProvider;
 
@@ -36,11 +53,9 @@ impl Provider for PythonProvider {
             id: "python".parse().expect("static provider identifier"),
             description: "Runs one bounded Python 3 script in a fresh import-free RustPython 0.5.0 VM"
                 .to_owned(),
-            command_words: Vec::new(),
+            command_words: vec![COMMAND_WORD.to_owned()],
             capabilities: vec![ProviderCapability {
-                id: "python.eval"
-                    .parse()
-                    .expect("static capability identifier"),
+                id: EVAL.parse().expect("static capability identifier"),
                 description: "Evaluate a bounded Python 3 script with json, re, and constrained yaml; assign the safe JSON-shaped return value to result"
                     .to_owned(),
                 effect: EffectKind::ReadOnly,
@@ -62,7 +77,7 @@ impl Provider for PythonProvider {
     }
 
     fn invoke(capability: &CapabilityId, input: Value) -> Result<Value, ProviderError> {
-        if capability.as_str() != "python.eval" {
+        if capability.as_str() != EVAL {
             return Err(ProviderError::new(
                 "unsupported-capability",
                 "the python provider exposes only python.eval",
@@ -82,16 +97,20 @@ impl Provider for PythonProvider {
         }
         Ok(eval::evaluate(&script))
     }
+
+    fn run_command(argv: &[String], stdin: Option<&str>) -> Result<CommandRun, ProviderError> {
+        commands::run(argv, stdin)
+    }
 }
 
-dekopon_provider_sdk::export_provider!(PythonProvider);
+dekopon_provider_sdk::export_provider_with_cli!(PythonProvider, bindings);
 
 #[cfg(test)]
 mod tests {
     use dekopon_provider_sdk::{EffectKind, Provider, RiskLevel};
     use serde_json::json;
 
-    use super::{PythonProvider, SCRIPT_BYTES};
+    use super::{COMMAND_WORD, EVAL, PythonProvider, SCRIPT_BYTES};
 
     fn capability(value: &str) -> dekopon_provider_sdk::CapabilityId {
         value.parse().expect("valid capability fixture")
@@ -105,10 +124,10 @@ mod tests {
         );
         let manifest = PythonProvider::manifest();
         assert_eq!(manifest.id.as_str(), "python");
-        assert!(manifest.command_words.is_empty());
+        assert_eq!(manifest.command_words, [COMMAND_WORD]);
         assert_eq!(manifest.capabilities.len(), 1);
         let capability = &manifest.capabilities[0];
-        assert_eq!(capability.id.as_str(), "python.eval");
+        assert_eq!(capability.id.as_str(), EVAL);
         assert_eq!(capability.effect, EffectKind::ReadOnly);
         assert_eq!(capability.risk, RiskLevel::High);
         assert_eq!(capability.input_schema["additionalProperties"], false);
@@ -126,12 +145,12 @@ mod tests {
             json!({"script": 1}),
             json!({"script": "result = 1", "extra": true}),
         ] {
-            let error = PythonProvider::invoke(&capability("python.eval"), input)
-                .expect_err("invalid input");
+            let error =
+                PythonProvider::invoke(&capability(EVAL), input).expect_err("invalid input");
             assert_eq!(error.code(), "invalid-input");
         }
         let error = PythonProvider::invoke(
-            &capability("python.eval"),
+            &capability(EVAL),
             json!({"script": "x".repeat(SCRIPT_BYTES + 1)}),
         )
         .expect_err("oversized script");

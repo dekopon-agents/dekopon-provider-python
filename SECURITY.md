@@ -26,7 +26,10 @@ Python import hook:
 - the Python-visible module registry is replaced with the three exact public modules, and denied
   transitive module references are removed from loaded module namespaces;
 - `sys`, `os`, `pathlib`, `time`, `random`, `secrets`, `socket`, `ssl`, `sqlite3`, `subprocess`,
-  `threading`, `ctypes`, `tkinter`, and `webbrowser` are denied.
+  `threading`, `ctypes`, `tkinter`, and `webbrowser` are denied;
+- the `python` command word's `run-command` export only parses argv. It renders help and usage
+  errors, or returns a `python.eval` proposal that the host authorizes exactly like a direct call;
+  it constructs no VM and grants nothing.
 
 Python introspection is not a capability boundary. A script might find implementation objects or
 consume CPU/memory, but a zero-import store gives those objects no host authority. Admit only the

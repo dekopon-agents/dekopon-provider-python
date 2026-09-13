@@ -9,7 +9,9 @@
 
 use std::{path::PathBuf, time::Duration};
 
-use dekopon_provider_sdk_testkit::{BrokerHostLimits, FakeBroker, FakeBrokerError};
+use dekopon_provider_sdk_testkit::{
+    BrokerHostLimits, CommandRunOutcome, FakeBroker, FakeBrokerError,
+};
 use serde_json::{Value, json};
 
 fn component() -> Option<PathBuf> {
@@ -87,12 +89,12 @@ async fn broker_runs_success_yaml_denial_and_fresh_state() -> Result<(), Box<dyn
     assert_eq!(denied["ok"], false);
     assert_eq!(denied["error"]["type"], "ImportError");
 
-    // The host decoded the rebuilt manifest: one capability, no command words, and no retired
+    // The host decoded the rebuilt manifest: one capability, the `python` word, and no retired
     // `idempotency` field for the SDK's compatibility decoder to swallow.
     let manifests: Vec<_> = broker.registry().manifests().collect();
     assert_eq!(manifests.len(), 1);
     assert_eq!(manifests[0].id.as_str(), "python");
-    assert!(manifests[0].command_words.is_empty());
+    assert_eq!(manifests[0].command_words, ["python"]);
     assert_eq!(manifests[0].capabilities.len(), 1);
     assert_eq!(manifests[0].capabilities[0].id.as_str(), "python.eval");
     Ok(())
@@ -206,6 +208,76 @@ async fn broker_projects_the_exact_capability_envelope() -> Result<(), Box<dyn s
         Some("input-too-large")
     );
 
+    Ok(())
+}
+
+/// The `python` word through the real broker host's `run-command` export: the guest renders help
+/// and usage errors itself, `-c` and `-` propose exactly the input a direct call sends, and
+/// invoking that proposal closes the loop.
+#[tokio::test(flavor = "multi_thread")]
+async fn broker_runs_the_python_command_word() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(component) = component() else {
+        return Ok(());
+    };
+    let broker = dedicated_broker(&component).await?;
+    let argv =
+        |words: &[&str]| -> Vec<String> { words.iter().map(|word| (*word).to_owned()).collect() };
+
+    match broker
+        .run_command("python", &argv(&["--help"]), None)
+        .await?
+    {
+        CommandRunOutcome::Rendered {
+            stdout,
+            stderr,
+            status: 0,
+        } => {
+            assert!(
+                stdout.contains("Usage: python -c <CODE>\n       python - <<'EOF'"),
+                "{stdout}"
+            );
+            assert!(stderr.is_empty(), "{stderr}");
+        }
+        other => panic!("expected help at status 0, got {other:?}"),
+    }
+
+    match broker
+        .run_command("python", &[], Some("result = 1"))
+        .await?
+    {
+        CommandRunOutcome::Rendered {
+            stdout, status: 2, ..
+        } => assert!(stdout.is_empty(), "{stdout}"),
+        other => panic!("expected a usage error at status 2, got {other:?}"),
+    }
+
+    match broker.run_command("python", &argv(&["-"]), None).await? {
+        CommandRunOutcome::Failed { error } => {
+            assert_eq!(error.code, "usage");
+            assert_eq!(error.message, "python -: nothing was piped in");
+        }
+        other => panic!("expected a usage decline, got {other:?}"),
+    }
+
+    let code = "print(\"hi\")\nresult = 6 * 7";
+    let piped = format!("{code}\n");
+    for (words, stdin, script) in [
+        (&["-c", code][..], None, code),
+        (&["-"][..], Some(piped.as_str()), piped.as_str()),
+    ] {
+        let CommandRunOutcome::Proposed { capability, input } =
+            broker.run_command("python", &argv(words), stdin).await?
+        else {
+            panic!("expected a proposal for {words:?}");
+        };
+        assert_eq!(capability.as_str(), "python.eval");
+        assert_eq!(input, json!({"script": script}));
+        let output = broker.invoke(capability.as_str(), input).await?;
+        assert_eq!(
+            output,
+            json!({"ok": true, "stdout": "hi\n", "stdoutTruncated": false, "result": 42})
+        );
+    }
     Ok(())
 }
 

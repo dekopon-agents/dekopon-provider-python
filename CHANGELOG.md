@@ -1,6 +1,21 @@
 # Changelog
 
-## 0.2.0 - Unreleased
+## 0.3.0 - Unreleased
+
+- Add the `python` command word, exported through `run-command` from
+  `dekopon:provider/provider-cli@0.3.0`. `python -c CODE` and `python - <<'EOF'` propose
+  `python.eval` with exactly `{"script": ...}`, authorized like a direct call; `python --help` and
+  `--version` render at status 0 and usage errors at status 2, in the guest and without a VM.
+  `python -` with nothing piped is declined as a usage error. `invoke` and its input are unchanged.
+- Dekopon is removing every agent-facing way to reach a provider except its command word, and will
+  refuse to boot a provider that declares capabilities and no word, so 0.2.0 stops loading there.
+  0.13.0 hosts already dispatch this word.
+- clap 4.6.6, through the SDK's `clap` feature, joins the component graph and the
+  corresponding-source archive (MIT OR Apache-2.0). The provider now generates its own
+  `wit-bindgen` 0.62.0 bindings for the `provider-cli` world of the unchanged, byte-pinned
+  `wit/provider.wit`.
+
+## 0.2.0 - 2026-09-12
 
 - Move to `dekopon-provider-sdk` 0.13.0 and `dekopon:provider@0.3.0`. The retired `idempotency`
   capability classification is gone from the manifest, so an 0.11-era host will not load this

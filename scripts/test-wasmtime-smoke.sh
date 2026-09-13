@@ -6,7 +6,13 @@ component=${1:?usage: test-wasmtime-smoke.sh <component.wasm>}
 
 wasmtime run --invoke 'describe()' "$component" \
   | jq -r . \
-  | jq -e '.id == "python" and .commandWords == [] and (.capabilities | length) == 1' >/dev/null
+  | jq -e '.id == "python" and .commandWords == ["python"] and (.capabilities | length) == 1' \
+    >/dev/null
+
+wasmtime run --invoke 'run-command(["-c", "result = 2"], none)' "$component" \
+  | jq -r . \
+  | jq -e '.outcome == "proposed" and .capability == "python.eval" and
+      .input == {"script": "result = 2"}' >/dev/null
 
 wasmtime run \
   --invoke 'invoke("python.eval", "{\"script\":\"result = 2\"}")' \
