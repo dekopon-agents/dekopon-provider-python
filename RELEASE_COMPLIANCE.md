@@ -128,9 +128,10 @@ A failure or cancellation before release finalization invokes run-owned cleanup.
 only the two deterministic final refs and their known digests, verifies this run's annotation and
 exact source/license/version metadata, and refuses to delete a manifest carrying any additional
 tag. It deletes the provider before the source and deletes only this run's marked draft. It never
-deletes another release or unrelated package state. The workflow creates no second tag for either manifest digest. Once the
-marked release is no longer a draft, cleanup preserves the immutable finalized release and both
-artifacts; a failing post-finalization read-only check is reported without destructive rollback.
+deletes another release or unrelated package state. The workflow creates no second tag for either
+manifest digest. Once the marked release is no longer a draft, cleanup preserves the immutable
+finalized release and both artifacts; a failing post-finalization read-only check is reported
+without destructive rollback.
 
 Do not tag, push, package, or release until the owner chooses to perform the remaining mechanical
 publication steps. Every annotated `v<version>` tag must be contained in `main`.
