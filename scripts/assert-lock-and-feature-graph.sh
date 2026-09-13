@@ -22,7 +22,7 @@ for name in required_rustpython:
     if versions.get(name) != {"0.5.0"}:
         raise SystemExit(f"error: {name} must resolve exactly once at 0.5.0, got {versions.get(name)}")
 required = {
-    "dekopon-provider-sdk": {"0.13.0"},
+    "dekopon-provider-sdk": {"0.15.0"},
     "malachite-base": {"0.9.2"},
     "malachite-bigint": {"0.9.2"},
     "malachite-nz": {"0.9.2"},
@@ -34,7 +34,7 @@ for name, expected in required.items():
     if versions.get(name) != expected:
         raise SystemExit(f"error: {name} must be {expected}, got {versions.get(name)}")
 checksums = {
-    ("dekopon-provider-sdk", "0.13.0"): "3744dadb6220a9c0f50ce2ee58ef709d0141b3a1faa4e7bda9ca8beab6e2399b",
+    ("dekopon-provider-sdk", "0.15.0"): "85099a8b9d7fe66a653ea4e3621ccc490df6e84d54632de64e2022e4cc983ac9",
     ("malachite-base", "0.9.2"): "a4f44099731f17094b07825c88ccb5fbd1bfa1f82fafff7daa33e8b8652db16e",
     ("malachite-bigint", "0.9.2"): "cc58206ba15e9c406e20c95c5f86efa07b12f94080945908e910b3a0faa23fef",
     ("malachite-nz", "0.9.2"): "a137660cdba20f136c8a223125f08088adb4e0b72fbb8466f08c43e31cc0427d",

@@ -1,14 +1,17 @@
 //! The `python` command word: the interpreter's own argv, parsed in the guest.
 //!
 //! `python -c CODE` runs CODE, and `python -` runs the value piped into the word, so a script
-//! travels as a here-document: `python - <<'EOF' … EOF`. Both become a proposal for `python.eval`
-//! carrying exactly the input a direct call sends, `{"script": …}`, which is then authorized like
-//! any other call. `python --help`, `python --version`, and every usage error are rendered here and
-//! authorize nothing. No VM exists until the proposal is invoked, so running the word costs no
-//! interpreter startup.
+//! travels as a here-document: `python - <<'EOF' … EOF`. Bare argv with a non-empty piped value is
+//! `-` in disguise: CPython reads its program from a non-tty stdin when given no file, so
+//! `python <<'EOF' … EOF` matches that instead of failing clap's required-argument check. All
+//! three become a proposal for `python.eval` carrying exactly the input a direct call sends,
+//! `{"script": …}`, which is then authorized like any other call. `python --help`, `python
+//! --version`, and every usage error are rendered here and authorize nothing. No VM exists until
+//! the proposal is invoked, so running the word costs no interpreter startup.
 //!
 //! There is no `python FILE` and no trailing `sys.argv`: the component has no filesystem and the
-//! capability takes a script and nothing else, so clap refuses both.
+//! capability takes a script and nothing else, so clap refuses both. Bare argv with nothing piped,
+//! or an empty pipe, is still a usage error — only an explicit `-` accepts an empty script.
 
 use dekopon_provider_sdk::clap::{self, CommandFactory, FromArgMatches, Parser};
 use dekopon_provider_sdk::{CommandInvocation, CommandRun, ProviderError, cli};
@@ -45,7 +48,7 @@ Examples:
     name = COMMAND_WORD,
     version,
     about = "Run one Python 3 script in a fresh, import-free RustPython 0.5.0 VM",
-    override_usage = "python -c <CODE>\n       python - <<'EOF'",
+    override_usage = "python -c <CODE>\n       python - <<'EOF'\n       python <<'EOF'",
     after_help = AFTER_HELP,
     group = clap::ArgGroup::new("script").args(["code", "piped"]).required(true),
 )]
@@ -59,7 +62,20 @@ struct Python {
 }
 
 /// Runs one `python` argv.
+///
+/// Bare argv with a non-empty piped value is `python -` in disguise, matching CPython's own read
+/// of a non-tty stdin when given no file: it proposes without ever reaching clap, which cannot see
+/// `stdin` and would otherwise fail its required-argument check. Bare argv with nothing piped, or
+/// an empty pipe, still reaches clap and fails exactly as it always has.
 pub(crate) fn run(argv: &[String], stdin: Option<&str>) -> Result<CommandRun, ProviderError> {
+    if argv.is_empty()
+        && let Some(script) = stdin.filter(|value| !value.is_empty())
+    {
+        return Ok(CommandRun::proposal(
+            EVAL.parse().expect("static capability ID"),
+            json!({ "script": script }),
+        ));
+    }
     cli::run_command(Python::command(), argv, stdin, dispatch)
 }
 
@@ -89,6 +105,7 @@ fn dispatch(
     Ok(CommandInvocation {
         capability: EVAL.parse().expect("static capability ID"),
         input: json!({ "script": script }),
+        secret_use: None,
     })
 }
 
@@ -133,6 +150,7 @@ Run one Python 3 script in a fresh, import-free RustPython 0.5.0 VM
 
 Usage: python -c <CODE>
        python - <<'EOF'
+       python <<'EOF'
 
 Arguments:
   [-]  Read the script from the value piped into the word
@@ -174,7 +192,6 @@ Examples:
     #[test]
     fn usage_errors_render_on_stderr_at_status_two() {
         for words in [
-            &[][..],
             &["-c"][..],
             &["-c", "result = 1", "-"][..],
             &["script.py"][..],
@@ -190,28 +207,50 @@ Examples:
             }
         }
 
-        // No script is the usage error a model meets when it pipes a script without `-`, so the
-        // usage lines it prints are the two forms that work. Piped or not, nothing is proposed.
-        const NO_SCRIPT: &str = "\
-error: the following required arguments were not provided:
-  <-c <CODE>|->
-
-Usage: python -c <CODE>
-       python - <<'EOF'
-
-For more information, try '--help'.
-";
-        for stdin in [None, Some("result = 1")] {
-            let (_, stderr, _) = rendered(&[], stdin);
-            assert_eq!(stderr, NO_SCRIPT, "{stdin:?}");
-        }
-
         // There is no filesystem, so a file argument names the one positional value that exists.
         let (_, stderr, _) = rendered(&["script.py"], None);
         assert!(
             stderr.contains("invalid value 'script.py' for '[-]'"),
             "{stderr}"
         );
+    }
+
+    /// Bare argv with something piped is `python -` in disguise, matching CPython's own read of a
+    /// non-tty stdin when given no file: the proposal is identical either way.
+    #[test]
+    fn bare_invocation_with_a_piped_value_proposes_like_dash() {
+        let piped = "import json\nresult = json.loads('[1, 2]')\n";
+        let bare = proposal(&[], Some(piped));
+        let dash = proposal(&["-"], Some(piped));
+        assert_eq!(bare, dash);
+        assert_eq!(bare.input, json!({"script": piped}));
+
+        // An empty here-document is still a non-empty `Some("")` on the wire only when it is
+        // truly empty text; a script consisting of only whitespace still counts as piped.
+        let whitespace = proposal(&[], Some(" \n"));
+        assert_eq!(whitespace.input, json!({"script": " \n"}));
+    }
+
+    /// Unlike explicit `-`, bare argv needs something actually piped: nothing at all, or an empty
+    /// pipe, is still the same usage error clap has always rendered for it.
+    #[test]
+    fn bare_invocation_with_no_piped_value_is_still_a_usage_error() {
+        const NO_SCRIPT: &str = "\
+error: the following required arguments were not provided:
+  <-c <CODE>|->
+
+Usage: python -c <CODE>
+       python - <<'EOF'
+       python <<'EOF'
+
+For more information, try '--help'.
+";
+        for stdin in [None, Some("")] {
+            let (stdout, stderr, status) = rendered(&[], stdin);
+            assert_eq!(status, 2, "{stdin:?}");
+            assert!(stdout.is_empty(), "{stdin:?}: {stdout}");
+            assert_eq!(stderr, NO_SCRIPT, "{stdin:?}");
+        }
     }
 
     #[test]
