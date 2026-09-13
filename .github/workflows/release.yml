@@ -421,40 +421,16 @@ jobs:
               return 1
             fi
           }
-          set_package_visibility() {
-            local package=$1 target=$2 current
-            for _ in {1..30}; do
-              current=$(package_visibility "$package" \
-                "$RUNNER_TEMP/$package-check-visibility.err")
-              [[ "$current" == "$target" ]] && return 0
-              if [[ "$current" != absent ]]; then
-                gh api --method PATCH \
-                  "/orgs/dekopon-agents/packages/container/$package" \
-                  -f "visibility=$target" >/dev/null \
-                  2>"$RUNNER_TEMP/$package-set-visibility.err" || true
-              fi
-              sleep 2
-            done
-            cat "$RUNNER_TEMP/$package-set-visibility.err" >&2 || true
-            echo "error: could not set $package visibility to $target" >&2
-            return 1
-          }
-          prepare_private_package() {
-            local package=$1 initial=$2 current
-            current=$(package_visibility "$package" "$RUNNER_TEMP/$package-current.err")
-            test "$current" = "$initial"
-            if [[ "$current" == public ]]; then
-              set_package_visibility "$package" private
-            fi
-          }
 
           # Prove both immutable version tags absent before the first package mutation.
           assert_absent "$provider_ref" provider-version
           assert_absent "$source_ref" source-version
 
-          # The corresponding-source final ref is the first manifest effect. Keep an existing
-          # package private until its exact run-owned manifest and digest have been authenticated.
-          prepare_private_package provider-python-source "$SOURCE_INITIAL_VISIBILITY"
+          # The corresponding-source final ref is the first manifest effect. GHCR visibility is
+          # per package, not per version, and there is no API to change it, so a new version is
+          # publicly resolvable from this push until it is authenticated below. Hiding it would
+          # mean hiding every previously released version from everyone for the same window.
+          # Cleanup deleting this run's version by digest is what bounds a failed authentication.
           archive="dekopon-python-provider-$VERSION-relink-source.tar.gz"
           sbom="dekopon-python-provider-$VERSION.cdx.json"
           archive_sha=$(sha256sum "dist/$archive" | awk '{print $1}')
@@ -494,7 +470,6 @@ jobs:
             "$SOURCE_OCI_REPOSITORY@$source_digest" >"$RUNNER_TEMP/source-manifest.json"
           ./scripts/verify-oci-manifest.py source "$RUNNER_TEMP/source-manifest.json" \
             dist "$run" "$GITHUB_SHA"
-          set_package_visibility provider-python-source public
 
           # The source package must already be independently accessible and byte-exact without any
           # credential before the provider package is changed or its final manifest is pushed.
@@ -524,10 +499,8 @@ jobs:
           test "$("$RUNNER_TEMP/oras-bin" manifest fetch --descriptor "$source_ref" |
             jq -er .digest)" = "$source_digest"
 
-          # Recheck the provider final tag after the source checks, then make any existing provider
-          # package private so its sole new version cannot be exposed before manifest validation.
+          # Recheck the provider final tag after the source checks, immediately before its push.
           assert_absent "$provider_ref" provider-before-push
-          prepare_private_package provider-python "$PROVIDER_INITIAL_VISIBILITY"
           (
             cd dist
             "$RUNNER_TEMP/oras-bin" push "$provider_ref" \
@@ -552,7 +525,6 @@ jobs:
             "$OCI_REPOSITORY@$provider_digest" >"$RUNNER_TEMP/provider-manifest.json"
           ./scripts/verify-oci-manifest.py provider "$RUNNER_TEMP/provider-manifest.json" \
             dist "$run" "$GITHUB_SHA" "$source_digest"
-          set_package_visibility provider-python public
 
           docker logout ghcr.io
           mkdir "$RUNNER_TEMP/anonymous-provider" "$RUNNER_TEMP/anonymous-source"
@@ -954,63 +926,16 @@ jobs:
               "/orgs/dekopon-agents/packages/container/$package/versions/$version_id"
             assert_ref_absent "$reference" "$label"
           }
-          current_visibility() {
-            local package=$1 error=$2 visibility
-            if visibility=$(gh api "/orgs/dekopon-agents/packages/container/$package" \
-              --jq .visibility 2>"$error"); then
-              [[ "$visibility" == private || "$visibility" == public ]]
-              printf '%s\n' "$visibility"
-            elif grep -Eqi 'not found|404' "$error"; then
-              printf 'absent\n'
-            else
-              cat "$error" >&2
-              return 1
-            fi
-          }
-          put_visibility() {
-            local package=$1 target=$2
-            for _ in {1..30}; do
-              if [[ "$(current_visibility "$package" \
-                "$RUNNER_TEMP/$package-restored.err")" == "$target" ]]; then
-                return 0
-              fi
-              gh api --method PATCH \
-                "/orgs/dekopon-agents/packages/container/$package" \
-                -f "visibility=$target" >/dev/null \
-                2>"$RUNNER_TEMP/$package-restore.err" || true
-              sleep 2
-            done
-            cat "$RUNNER_TEMP/$package-restore.err" >&2 || true
-            return 1
-          }
-          restore_visibility() {
-            local package=$1 initial=$2 current versions
-            current=$(current_visibility "$package" "$RUNNER_TEMP/$package-current.err")
-            [[ "$current" == absent ]] && return 0
-            if [[ "$initial" == absent ]]; then
-              versions="$RUNNER_TEMP/$package-remaining-versions.jsons"
-              gh api --paginate \
-                "/orgs/dekopon-agents/packages/container/$package/versions?per_page=100" \
-                >"$versions"
-              jq -se '([.[][]] | length) == 0' "$versions" >/dev/null || {
-                echo "error: refusing to change visibility of newly unrelated $package versions" >&2
-                return 1
-              }
-              initial=private
-            fi
-            if [[ "$current" != "$initial" ]]; then
-              put_visibility "$package" "$initial"
-            fi
-          }
 
           # Never remove source while a run-owned provider survives. No other tag is created for
           # either digest, and package metadata must prove the manifest is not shared before DELETE.
+          # Package visibility is not restored because publication never changed it: GHCR exposes no
+          # API to change visibility, and the recorded prior values above exist to prove this run
+          # owns what it is about to delete, not to be written back.
           delete_owned_manifest provider-python "$OCI_REPOSITORY" \
             "$OCI_REPOSITORY:$version" "$provider_record" provider-final
-          restore_visibility provider-python "$PROVIDER_INITIAL_VISIBILITY"
           delete_owned_manifest provider-python-source "$SOURCE_OCI_REPOSITORY" \
             "$SOURCE_OCI_REPOSITORY:$version" "$source_record" source-final
-          restore_visibility provider-python-source "$SOURCE_INITIAL_VISIBILITY"
 
           if [[ "$release_owned_draft" == true ]]; then
             gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/$release_id"

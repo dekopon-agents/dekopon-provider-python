@@ -296,32 +296,6 @@ jobs:
               return 1
             fi
           }
-          set_package_visibility() {
-            local package=$1 target=$2 current
-            for _ in {1..30}; do
-              current=$(package_visibility "$package" \
-                "$RUNNER_TEMP/$package-check-visibility.err")
-              [[ "$current" == "$target" ]] && return 0
-              if [[ "$current" != absent ]]; then
-                gh api --method PATCH \
-                  "/orgs/dekopon-agents/packages/container/$package" \
-                  -f "visibility=$target" >/dev/null \
-                  2>"$RUNNER_TEMP/$package-set-visibility.err" || true
-              fi
-              sleep 2
-            done
-            cat "$RUNNER_TEMP/$package-set-visibility.err" >&2 || true
-            echo "error: could not set $package visibility to $target" >&2
-            return 1
-          }
-          prepare_private_package() {
-            local package=$1 initial=$2 current
-            current=$(package_visibility "$package" "$RUNNER_TEMP/$package-current.err")
-            test "$current" = "$initial"
-            if [[ "$current" == public ]]; then
-              set_package_visibility "$package" private
-            fi
-          }
 
           # The exact source manifest was committed by recovery run 32709673725 before package
           # visibility propagation timed out. Preserve that immutable effect and prove every byte
@@ -354,10 +328,11 @@ jobs:
           printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" \
             --password-stdin >/dev/null
 
-          # Recheck the provider final tag after the source checks, then make any existing provider
-          # package private so its sole new version cannot be exposed before manifest validation.
+          # Recheck the provider final tag after the source checks, immediately before its push.
+          # GHCR exposes no API to change package visibility, so the new version is publicly
+          # resolvable from the push until it is authenticated below; cleanup deleting it by digest
+          # is what bounds a failed authentication.
           assert_absent "$provider_ref" provider-before-push
-          prepare_private_package provider-python "$PROVIDER_INITIAL_VISIBILITY"
           (
             cd dist
             "$RUNNER_TEMP/oras-bin" push "$provider_ref" \
@@ -382,7 +357,6 @@ jobs:
             "$OCI_REPOSITORY@$provider_digest" >"$RUNNER_TEMP/provider-manifest.json"
           ./scripts/verify-oci-manifest.py provider "$RUNNER_TEMP/provider-manifest.json" \
             dist "$run" "$RELEASE_SHA" "$source_digest"
-          set_package_visibility provider-python public
 
           docker logout ghcr.io
           mkdir "$RUNNER_TEMP/anonymous-provider" "$RUNNER_TEMP/anonymous-source"
@@ -783,60 +757,12 @@ jobs:
               "/orgs/dekopon-agents/packages/container/$package/versions/$version_id"
             assert_ref_absent "$reference" "$label"
           }
-          current_visibility() {
-            local package=$1 error=$2 visibility
-            if visibility=$(gh api "/orgs/dekopon-agents/packages/container/$package" \
-              --jq .visibility 2>"$error"); then
-              [[ "$visibility" == private || "$visibility" == public ]]
-              printf '%s\n' "$visibility"
-            elif grep -Eqi 'not found|404' "$error"; then
-              printf 'absent\n'
-            else
-              cat "$error" >&2
-              return 1
-            fi
-          }
-          put_visibility() {
-            local package=$1 target=$2
-            for _ in {1..30}; do
-              if [[ "$(current_visibility "$package" \
-                "$RUNNER_TEMP/$package-restored.err")" == "$target" ]]; then
-                return 0
-              fi
-              gh api --method PATCH \
-                "/orgs/dekopon-agents/packages/container/$package" \
-                -f "visibility=$target" >/dev/null \
-                2>"$RUNNER_TEMP/$package-restore.err" || true
-              sleep 2
-            done
-            cat "$RUNNER_TEMP/$package-restore.err" >&2 || true
-            return 1
-          }
-          restore_visibility() {
-            local package=$1 initial=$2 current versions
-            current=$(current_visibility "$package" "$RUNNER_TEMP/$package-current.err")
-            [[ "$current" == absent ]] && return 0
-            if [[ "$initial" == absent ]]; then
-              versions="$RUNNER_TEMP/$package-remaining-versions.jsons"
-              gh api --paginate \
-                "/orgs/dekopon-agents/packages/container/$package/versions?per_page=100" \
-                >"$versions"
-              jq -se '([.[][]] | length) == 0' "$versions" >/dev/null || {
-                echo "error: refusing to change visibility of newly unrelated $package versions" >&2
-                return 1
-              }
-              initial=private
-            fi
-            if [[ "$current" != "$initial" ]]; then
-              put_visibility "$package" "$initial"
-            fi
-          }
 
           # Remove only a provider manifest committed by this run. The exact public source
           # prerequisite remains immutable across retries and is never a cleanup target here.
+          # Visibility is not restored because publication never changed it.
           delete_owned_manifest provider-python "$OCI_REPOSITORY" \
             "$OCI_REPOSITORY:0.1.0" "$provider_record" provider-final
-          restore_visibility provider-python "$PROVIDER_INITIAL_VISIBILITY"
 
           if [[ "$release_owned_draft" == true ]]; then
             gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/$release_id"

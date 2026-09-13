@@ -90,6 +90,17 @@ that binds the two artifacts. It uses artifact type
 `application/vnd.dekopon.provider.source.v1` and exact per-file media types. Neither repository
 publishes `latest` or another mutable alias.
 
+## Package visibility
+
+Both packages are public, and the release workflow never changes that. GHCR visibility is a
+property of a package, not of a version, and GitHub exposes no REST endpoint to change it — it is a
+web-UI setting. So a newly pushed version is publicly resolvable from the moment of its push until
+the manifest authentication a few seconds later, and making it unreachable for that window would
+mean making every previously released version unreachable too. What bounds a failed authentication
+is the rollback above: cleanup resolves this run's version by digest, refuses any manifest carrying
+an additional tag, and deletes it. The prior visibility of each package is still recorded in the
+run-marked draft, as evidence that the run owns what it may later delete.
+
 ## Transaction and rollback gates
 
 The tag workflow will proceed only when all of these hold:
@@ -101,14 +112,14 @@ The tag workflow will proceed only when all of these hold:
   deterministic component rebuild, deterministic source-bundle rebuild, and modified-Malachite
   offline relink test pass with pinned tools;
 - no GitHub Release or final provider/source OCI version already exists, and the prior visibility
-  of each authorized package is recorded in the run-marked draft before package mutation;
+  of each authorized package is recorded in the run-marked draft before any manifest is pushed;
 - the draft contains the exact 14 re-downloaded assets;
 - the source manifest is pushed directly to its sole final `<version>` tag with exact layer counts,
   media types, byte digests, source/license metadata, immutable version/revision, and the unique run
-  annotation; it is made public and every source/compliance byte is verified anonymously;
+  annotation; every source/compliance byte is then verified anonymously;
 - only after that source verification is the one-layer provider manifest pushed directly to its
-  sole final `<version>` tag, linked to the known source digest, made public, and anonymously pulled;
-  both linked artifact byte sets are then recombined and checked successfully;
+  sole final `<version>` tag, linked to the known source digest, and anonymously pulled; both
+  linked artifact byte sets are then recombined and checked successfully;
 - the run-owned GitHub Release remains a draft throughout those checks and is finalized only after
   both final OCI manifests and all anonymous source/provider bytes have passed. Subsequent
   anonymous release checks are read-only.
@@ -116,11 +127,11 @@ The tag workflow will proceed only when all of these hold:
 A failure or cancellation before release finalization invokes run-owned cleanup. Cleanup resolves
 only the two deterministic final refs and their known digests, verifies this run's annotation and
 exact source/license/version metadata, and refuses to delete a manifest carrying any additional
-tag. It deletes the provider before the source, restores each package's recorded prior visibility
-where applicable, and deletes only this run's marked draft. It never deletes another release or
-unrelated package state. The workflow creates no second tag for either manifest digest. Once the
-marked release is no longer a draft, cleanup preserves the immutable finalized release and both
-artifacts; a failing post-finalization read-only check is reported without destructive rollback.
+tag. It deletes the provider before the source and deletes only this run's marked draft. It never
+deletes another release or unrelated package state. The workflow creates no second tag for either
+manifest digest. Once the marked release is no longer a draft, cleanup preserves the immutable
+finalized release and both artifacts; a failing post-finalization read-only check is reported
+without destructive rollback.
 
 Do not tag, push, package, or release until the owner chooses to perform the remaining mechanical
 publication steps. Every annotated `v<version>` tag must be contained in `main`.
