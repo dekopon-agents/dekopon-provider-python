@@ -2,9 +2,10 @@
 
 An import-free WebAssembly component exposing one read-only, High-risk capability:
 `python.eval`. It embeds **RustPython 0.5.0 exactly**, creates a fresh interpreter per call,
-captures bounded stdout in Rust, and returns only a bounded JSON-shaped result. Version 0.2.0
-targets `dekopon-provider-sdk` 0.13.0 and `dekopon:provider@0.3.0`; an 0.11-era host will not load
-it.
+captures bounded stdout in Rust, and returns only a bounded JSON-shaped result. A Dekopon shell
+reaches it through the `python` command word. Version 0.3.0 targets `dekopon-provider-sdk` 0.13.0
+and exports `run-command` from `dekopon:provider/provider-cli@0.3.0`; an 0.11-era host will not
+load it.
 
 > **Release status: owner-approved; mechanical publication interlock remains.** The owner accepted
 > the exact LGPL dependencies and corresponding-source/relink design for this standalone optional
@@ -55,15 +56,45 @@ See [RELINKING.md](RELINKING.md) for recipient modification, rebuild, componenti
 installation instructions. Generated archives, SBOMs, vendor trees, checksums, temporary build
 trees, and Wasm remain ignored and absent from Git.
 
+## The `python` command word
+
+In a Dekopon shell the provider is the `python` program. The script comes inline with `-c`, or
+piped with `-`, usually as a here-document:
+
+```console
+python -c 'result = sum(i * i for i in range(5))'
+python - <<'EOF' | jq .result
+import yaml
+result = yaml.safe_load("retries: 2")
+EOF
+```
+
+Both propose `python.eval` with exactly the [API](#api) input, `{"script": ...}`, and the broker
+authorizes and runs that proposal like a direct call. The guest parses the argv itself with the
+SDK's clap and constructs no VM to do it:
+
+| argv | Answer |
+|---|---|
+| `--help`, `-h`, `--version`, `-V` | rendered on stdout, status 0 |
+| `-c CODE` | proposes `{"script": CODE}`; a piped value is ignored |
+| `-` with a piped value | proposes `{"script": <piped value>}` |
+| `-` with nothing piped | declined: `python -: nothing was piped in`, a usage error at status 2 |
+| nothing, `-c` with `-`, a file name, extra arguments | clap's usage error on stderr, status 2 |
+
+There is no `python FILE`, no `sys.argv`, and no bare `python <<'EOF'`: the component has no
+filesystem, the capability takes only a script, and a script is always named by `-c` or `-`.
+`src/commands.rs` pins the help page byte for byte.
+
 ## Running it
 
-There is no command-line host for this component. Two things can run it.
+Outside a Dekopon shell there is no command-line host for this component. Two things can run it.
 
 The component has zero imports, so Wasmtime executes it directly. This is the quickest check that a
 build works, and it is what `scripts/test-wasmtime-smoke.sh` does:
 
 ```console
 wasmtime run --invoke 'describe()' ./python-provider.wasm
+wasmtime run --invoke 'run-command(["-c", "result = 2"], none)' ./python-provider.wasm
 wasmtime run \
   --invoke 'invoke("python.eval", "{\"script\":\"result = sum(i * i for i in range(5))\"}")' \
   ./python-provider.wasm
@@ -193,8 +224,8 @@ deadline, memory, admission, and container limits are mandatory.
 
 See [SECURITY.md](SECURITY.md) for the complete provider/host split and
 [docs/deployment-profile.md](docs/deployment-profile.md) for measured size, latency, fuel floor,
-RSS, and the selected broker profile. Generic provider calls, registry lookup, proposal submission,
-commands, persistence, and privileged imports are deliberately absent.
+RSS, and the selected broker profile. A script deliberately gets no generic provider calls, registry
+lookup, proposal submission, shell commands, persistence, or privileged imports.
 
 ## Validation
 

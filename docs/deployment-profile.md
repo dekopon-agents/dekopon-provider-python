@@ -29,17 +29,17 @@ intentionally asserted as safe failures and are not working profiles for RustPyt
 
 ## Measured artifact
 
-Measured on the v0.2.0 build with Rust 1.98.1 and wasm-tools 1.259.0 (2026-09-12). The component
+Measured on the v0.3.0 build with Rust 1.98.1 and wasm-tools 1.259.0 (2026-09-13). The component
 bytes are reproducible, so every checkout at this commit measures the same sizes and digest:
 
 | Measurement | Result |
 |---|---:|
-| raw core | 20,308,423 bytes |
-| component | 20,308,271 bytes |
-| SHA-256 | `d2a8c88166e3fc0790ecfb45870f9039fae1f70ddd078b72b26731539889f3d7` |
+| raw core | 20,574,151 bytes |
+| component | 20,573,752 bytes |
+| SHA-256 | `50a7e58977a9aa297733d27bf336b703cbde06678f44de4e2d7767360673f701` |
 | component/core imports | 0 / 0 |
-| core memories | 1, minimum 150 pages (9,830,400 bytes), host-capped |
-| core tables | 1, fixed 6,017 funcrefs |
+| core memories | 1, minimum 151 pages (9,895,936 bytes), host-capped |
+| core tables | 1, fixed 6,091 funcrefs |
 | 10,000,000 fuel | `OutOfFuel` during startup |
 | 50,000,000 fuel | `OutOfFuel` during startup |
 | 1,000,000,000 fuel | normal `result = 2` success |
@@ -58,7 +58,8 @@ fuel and invocation deadlines.
 
 A single cold compiler process was measured at up to roughly 591 MB RSS on the v0.1.0 build, when
 a command-line host still existed to measure it under `/usr/bin/time`. The component has grown by
-about 3 KB since, so that figure still bounds this build. Until platform-specific RSS and
+about 270 KB (1.3%) since, mostly clap for the `python` command word, so that figure is an estimate
+for this build rather than a bound. Until platform-specific RSS and
 concurrency load tests establish a tighter number, budget at least
 **768 MiB plus admitted concurrent guest reservations** for one compiler/connection profile; do
 not derive a container limit from the 64 MiB store ceiling alone.
