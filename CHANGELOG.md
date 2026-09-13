@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.0 - Unreleased
+
+- Move to `dekopon-provider-sdk` 0.15.0 and `dekopon-provider-sdk-testkit` 0.15.0.
+  `CommandInvocation` gains `secret_use`, always `None` here: this provider proposes no secret use.
+- Bare `python <<'EOF'` with something piped now proposes `python.eval` exactly like `python -`,
+  matching CPython's own read of a non-tty stdin when given no file: `{"script": <piped value>}`.
+  Bare argv with nothing piped, or an empty pipe, is still the same usage error as before.
+- Delete the stale one-shot `release-recovery.yml` workflow left over from the v0.1.0 recovery;
+  `ci.yml` and `release.yml` are unaffected.
+
 ## 0.3.0 - Unreleased
 
 - Add the `python` command word, exported through `run-command` from

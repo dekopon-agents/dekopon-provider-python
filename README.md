@@ -3,7 +3,7 @@
 An import-free WebAssembly component exposing one read-only, High-risk capability:
 `python.eval`. It embeds **RustPython 0.5.0 exactly**, creates a fresh interpreter per call,
 captures bounded stdout in Rust, and returns only a bounded JSON-shaped result. A Dekopon shell
-reaches it through the `python` command word. Version 0.3.0 targets `dekopon-provider-sdk` 0.13.0
+reaches it through the `python` command word. Version 0.4.0 targets `dekopon-provider-sdk` 0.15.0
 and exports `run-command` from `dekopon:provider/provider-cli@0.3.0`; an 0.11-era host will not
 load it.
 
@@ -58,8 +58,8 @@ trees, and Wasm remain ignored and absent from Git.
 
 ## The `python` command word
 
-In a Dekopon shell the provider is the `python` program. The script comes inline with `-c`, or
-piped with `-`, usually as a here-document:
+In a Dekopon shell the provider is the `python` program. The script comes inline with `-c`, piped
+with `-`, or piped with no flag at all, usually as a here-document:
 
 ```console
 python -c 'result = sum(i * i for i in range(5))'
@@ -67,11 +67,15 @@ python - <<'EOF' | jq .result
 import yaml
 result = yaml.safe_load("retries: 2")
 EOF
+python <<'EOF' | jq .result
+import yaml
+result = yaml.safe_load("retries: 2")
+EOF
 ```
 
-Both propose `python.eval` with exactly the [API](#api) input, `{"script": ...}`, and the broker
-authorizes and runs that proposal like a direct call. The guest parses the argv itself with the
-SDK's clap and constructs no VM to do it:
+All three propose `python.eval` with exactly the [API](#api) input, `{"script": ...}`, and the
+broker authorizes and runs that proposal like a direct call. The guest parses the argv itself with
+the SDK's clap and constructs no VM to do it:
 
 | argv | Answer |
 |---|---|
@@ -79,10 +83,13 @@ SDK's clap and constructs no VM to do it:
 | `-c CODE` | proposes `{"script": CODE}`; a piped value is ignored |
 | `-` with a piped value | proposes `{"script": <piped value>}` |
 | `-` with nothing piped | declined: `python -: nothing was piped in`, a usage error at status 2 |
-| nothing, `-c` with `-`, a file name, extra arguments | clap's usage error on stderr, status 2 |
+| nothing, with a non-empty piped value | proposes `{"script": <piped value>}`, identical to `-` |
+| nothing, with nothing piped or an empty pipe | clap's usage error on stderr, status 2 |
+| `-c` with `-`, a file name, extra arguments | clap's usage error on stderr, status 2 |
 
-There is no `python FILE`, no `sys.argv`, and no bare `python <<'EOF'`: the component has no
-filesystem, the capability takes only a script, and a script is always named by `-c` or `-`.
+There is no `python FILE` and no `sys.argv`: the component has no filesystem and the capability
+takes only a script, named by `-c`, `-`, or nothing at all when something non-empty is piped
+in — `python <<'EOF' … EOF` matches CPython's own read of a non-tty stdin when given no file.
 `src/commands.rs` pins the help page byte for byte.
 
 ## Running it

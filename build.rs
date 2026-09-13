@@ -10,7 +10,7 @@ fn main() {
     let actual = sha256(&wit);
     assert_eq!(
         actual, PROVIDER_WIT_SHA256,
-        "wit/provider.wit drifted from dekopon-provider-sdk 0.13.0"
+        "wit/provider.wit drifted from dekopon-provider-sdk 0.15.0"
     );
 }
 

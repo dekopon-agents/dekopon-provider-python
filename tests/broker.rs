@@ -241,14 +241,15 @@ async fn broker_runs_the_python_command_word() -> Result<(), Box<dyn std::error:
         other => panic!("expected help at status 0, got {other:?}"),
     }
 
-    match broker
-        .run_command("python", &[], Some("result = 1"))
-        .await?
-    {
-        CommandRunOutcome::Rendered {
-            stdout, status: 2, ..
-        } => assert!(stdout.is_empty(), "{stdout}"),
-        other => panic!("expected a usage error at status 2, got {other:?}"),
+    // Bare argv needs something actually piped: nothing at all, or an empty pipe, is still a
+    // usage error, unlike explicit `-` which accepts an empty piped value as an empty script.
+    for stdin in [None, Some("")] {
+        match broker.run_command("python", &[], stdin).await? {
+            CommandRunOutcome::Rendered {
+                stdout, status: 2, ..
+            } => assert!(stdout.is_empty(), "{stdin:?}: {stdout}"),
+            other => panic!("expected a usage error at status 2 for {stdin:?}, got {other:?}"),
+        }
     }
 
     match broker.run_command("python", &argv(&["-"]), None).await? {
@@ -264,9 +265,13 @@ async fn broker_runs_the_python_command_word() -> Result<(), Box<dyn std::error:
     for (words, stdin, script) in [
         (&["-c", code][..], None, code),
         (&["-"][..], Some(piped.as_str()), piped.as_str()),
+        // Bare argv with something piped is `-` in disguise, matching CPython's own read of a
+        // non-tty stdin when given no file.
+        (&[][..], Some(piped.as_str()), piped.as_str()),
     ] {
-        let CommandRunOutcome::Proposed { capability, input } =
-            broker.run_command("python", &argv(words), stdin).await?
+        let CommandRunOutcome::Proposed {
+            capability, input, ..
+        } = broker.run_command("python", &argv(words), stdin).await?
         else {
             panic!("expected a proposal for {words:?}");
         };
