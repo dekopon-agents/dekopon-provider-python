@@ -29,17 +29,19 @@ intentionally asserted as safe failures and are not working profiles for RustPyt
 
 ## Measured artifact
 
-Measured on the v0.4.0 CI build on `ubuntu-24.04`, the release platform, with Rust 1.98.1 and
-wasm-tools 1.259.0 (2026-09-13), on the 0.15.0 SDK. The component bytes are reproducible per
-platform: every Linux checkout at this commit measures the same sizes and digest, and that digest
-is what a release ships. A macOS build of the same commit has its own digest and may need one more
-memory page than the Linux minimum below.
+Measured on the v0.4.0 release run's `ubuntu-24.04` build, the release platform, with Rust 1.98.1
+and wasm-tools 1.259.0 (2026-09-13), on the 0.15.0 SDK; this is the exact artifact
+`ghcr.io/dekopon-agents/provider-python:0.4.0`'s `application/wasm` layer ships. The component
+bytes are reproducible per platform: every Linux checkout at this commit measures the same sizes
+and digest. A local macOS build of the same commit is 492 bytes larger (component 20,574,471
+bytes), with its own digest `7c32d685f20620691cb9716ec6bc4e1bad269ad29462641d37021b54c150c017`,
+and this release needs the same 151-page memory minimum on both platforms.
 
 | Measurement | Result |
 |---|---:|
-| raw core | 20,574,523 bytes |
-| component | 20,574,471 bytes |
-| SHA-256 | `7c32d685f20620691cb9716ec6bc4e1bad269ad29462641d37021b54c150c017` |
+| raw core | 20,574,031 bytes |
+| component | 20,573,979 bytes |
+| SHA-256 | `d6d0e15c8354e1fc4df5c410cfc0fa25ac11e6f06b972a822176adffca3ee9a5` |
 | component/core imports | 0 / 0 |
 | core memories | 1, minimum 151 pages (9,895,936 bytes), host-capped |
 | core tables | 1, fixed 6,091 funcrefs |
