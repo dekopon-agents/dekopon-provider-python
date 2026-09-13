@@ -29,16 +29,19 @@ intentionally asserted as safe failures and are not working profiles for RustPyt
 
 ## Measured artifact
 
-Measured on the v0.3.0 build with Rust 1.98.1 and wasm-tools 1.259.0 (2026-09-13). The component
-bytes are reproducible, so every checkout at this commit measures the same sizes and digest:
+Measured on the v0.3.0 CI build on `ubuntu-24.04`, the release platform, with Rust 1.98.1 and
+wasm-tools 1.259.0 (2026-09-13). The component bytes are reproducible per platform: every Linux
+checkout at this commit measures the same sizes and digest, and that digest is what a release ships.
+A macOS build of the same commit is 152 bytes larger, with its own digest and a 151-page memory
+minimum.
 
 | Measurement | Result |
 |---|---:|
-| raw core | 20,574,151 bytes |
-| component | 20,573,752 bytes |
-| SHA-256 | `50a7e58977a9aa297733d27bf336b703cbde06678f44de4e2d7767360673f701` |
+| raw core | 20,573,999 bytes |
+| component | 20,573,600 bytes |
+| SHA-256 | `c13da54d763f6d08963d1ec2121123f3a14a399540603dacf58cc7313e6dc121` |
 | component/core imports | 0 / 0 |
-| core memories | 1, minimum 151 pages (9,895,936 bytes), host-capped |
+| core memories | 1, minimum 150 pages (9,830,400 bytes), host-capped |
 | core tables | 1, fixed 6,091 funcrefs |
 | 10,000,000 fuel | `OutOfFuel` during startup |
 | 50,000,000 fuel | `OutOfFuel` during startup |
