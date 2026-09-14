@@ -80,6 +80,12 @@ tree=$(mktemp)
 features=$(mktemp)
 trap 'rm -f "$metadata" "$tree" "$features"' EXIT
 cargo metadata --locked --manifest-path "$root/Cargo.toml" --format-version 1 >"$metadata"
+jq -e '.packages[] | select(.name == "dekopon-python-provider") |
+  .features.default == ["http"] and .features.http == ["dep:dekopon-provider-http"]' \
+  "$metadata" >/dev/null || {
+  echo "error: the supported default component must include the HTTP feature" >&2
+  exit 1
+}
 jq -e \
   --arg root "dekopon-python-provider" \
   --arg patch "$patch_manifest" '
@@ -95,7 +101,7 @@ jq -e \
 }
 
 cargo tree --locked --manifest-path "$root/Cargo.toml" \
-  --all-features --target wasm32-unknown-unknown -e normal,build --prefix none >"$tree"
+  --target wasm32-unknown-unknown -e normal,build --prefix none >"$tree"
 if grep -E '^(wasm-bindgen|js-sys|web-sys|wasm-bindgen-futures) v' "$tree"; then
   echo "error: browser/JavaScript package reached the Wasm target graph" >&2
   exit 1
@@ -109,7 +115,7 @@ if grep -E '^(wasi|wasip[0-9]*|wasi-common|wasi-cap-std-sync) v' "$tree"; then
   exit 1
 fi
 cargo tree --locked --manifest-path "$root/Cargo.toml" \
-  --all-features --target wasm32-unknown-unknown -e features -f '{p} {f}' >"$features"
+  --target wasm32-unknown-unknown -e features -f '{p} {f}' >"$features"
 if grep 'rustpython-vm v0.5.0' "$features" | grep -E 'host_env|stdio|threading|wasmbind' >/dev/null; then
   echo "error: forbidden RustPython host feature enabled" >&2
   exit 1

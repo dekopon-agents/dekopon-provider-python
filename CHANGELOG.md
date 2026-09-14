@@ -4,6 +4,7 @@
 
 ### Added
 
+- Update real-host test dependency rustls to 0.23.45 for RUSTSEC-2026-0285.
 - Ship one full HTTP `python-provider.wasm`: default-on `http` feature, `python.eval`, and
   `python` command, with native bounded `dekopon_requests` GET/HEAD and real-host grants.
   Consolidate exact import/WIT validation, release/reproduction and offline vendor relinking;
