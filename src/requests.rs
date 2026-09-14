@@ -160,7 +160,7 @@ pub(crate) mod requests_module {
                     for _ in 0..3 {
                         crate::eval::interpreter().enter(|vm| {
                             let scope = vm.new_scope_with_builtins();
-                            vm.run_code_string(
+                            vm.run_string(
                                 scope.clone(),
                                 "import dekopon_requests",
                                 "<response-type-init>".to_owned(),
@@ -177,7 +177,7 @@ pub(crate) mod requests_module {
                                     vm,
                                 )
                                 .unwrap();
-                            vm.run_code_string(
+                            vm.run_string(
                                 scope,
                                 r#"
 import dekopon_requests as r

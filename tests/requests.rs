@@ -74,7 +74,7 @@ impl Server {
                     "/two" => (200, b"{\"value\":3}".to_vec(), ""),
                     "/redirect" => (302, Vec::new(), "Location: /never\r\n"),
                     "/invalid" => (200, b"not json".to_vec(), ""),
-                    path if path.starts_with("/json/") => (200, path[6..].as_bytes().to_vec(), ""),
+                    path if path.starts_with("/json/") => (200, path.as_bytes()[6..].to_vec(), ""),
                     "/utf8" => (200, vec![255], ""),
                     "/large" => (200, vec![b'x'; 140_000], ""),
                     "/protocol" => {

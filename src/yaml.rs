@@ -334,7 +334,7 @@ mod tests {
             .spawn(|| {
                 for _ in 0..3 {
                     crate::eval::interpreter().enter(|vm| {
-                        vm.run_code_string(
+                        vm.run_string(
                             vm.new_scope_with_builtins(),
                             r#"
 import yaml
