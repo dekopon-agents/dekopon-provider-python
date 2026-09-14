@@ -7,54 +7,41 @@ reaches it through the `python` command word. Version 0.4.0 targets `dekopon-pro
 and exports `run-command` from `dekopon:provider/provider-cli@0.3.0`; an 0.11-era host will not
 load it.
 
-> **Release status: owner-approved; mechanical publication interlock remains.** The owner accepted
-> the exact LGPL dependencies and corresponding-source/relink design for this standalone optional
-> provider. This records a project policy choice, not attorney review. Publication still requires
-> the per-repository variable `PROVIDER_PYTHON_RELEASE_APPROVED=true`, an annotated tag, and every
-> transactional release check in `RELEASE_COMPLIANCE.md`.
+> **Release status: owner-approved.** The owner accepted the exact LGPL dependencies for this
+> standalone optional provider; this records a project policy choice, not attorney review. LGPL is
+> satisfied by the public tagged source, the reproducible build in
+> [`dekopon-agents/provider-workflows`](https://github.com/dekopon-agents/provider-workflows), and
+> the CycloneDX SBOM the shared release workflow publishes. Publication runs through that shared
+> workflow: pushing an annotated `v*` tag is the only trigger.
 
 ## Build
 
-Required versions are Rust 1.98.1, target `wasm32-unknown-unknown`, wasm-tools 1.259.0, and
-cargo-cyclonedx 0.5.9 when producing release source/SBOM assets. The component and all compliance
-artifacts are generated and ignored; they must never be committed.
+Required versions are Rust 1.98.1, target `wasm32-unknown-unknown`, and wasm-tools 1.259.0. The
+component is generated and ignored; it must never be committed. Build, lint, dependency-policy,
+and component checks all run through the shared
+[`dekopon-agents/provider-workflows`](https://github.com/dekopon-agents/provider-workflows) CI
+(`ci / validate`), which `.github/workflows/ci.yml` calls. To build and test locally:
 
 ```console
-./scripts/build-component.sh
-sha256sum --check python-provider.wasm.sha256
-wasm-tools validate python-provider.wasm
-./scripts/assert-zero-core-imports.sh python-provider.wasm
+cargo fmt --all --check
+cargo clippy --locked --workspace --all-targets -- -D warnings
+cargo deny --all-features check bans licenses sources advisories
+../provider-workflows/build.sh
+DEKOPON_PROVIDER_COMPONENT=$PWD/python-provider.wasm cargo test --locked --workspace
 ```
 
-`python-provider.wasm` and its checksum are generated release products, not source files. CI
-rejects any tracked `*.wasm`. `build-component.sh` builds a clean source snapshot at a fixed
-canonical path under a scrubbed environment because RustPython 0.5.0's build script otherwise
-freezes every visible build variable into `_sysconfigdata` (including accidental credentials). It
-retains the ordinary default target for that standalone snapshot and global sccache; no compiler
-wrapper, `CARGO_TARGET_DIR`, or incremental setting is replaced. The pinned
-`rustpython-derive-impl 0.5.0` source patch sorts `py_freeze!` module traversal and every
-map/set-backed macro token emission instead of compiling randomly seeded collection order. The gate
-scans the resulting component for sensitive environment keys and compares the complete frozen build
-input, raw core, and final component across independent builds.
+`../provider-workflows/build.sh` is a sibling checkout of the shared workflows repository (see its
+own README for the exact clone step CI uses); it writes `python-provider.wasm` and its checksum,
+componentizes, and validates. It builds a clean source snapshot at a fixed canonical path under a
+scrubbed environment because RustPython 0.5.0's build script otherwise freezes every visible build
+variable into `_sysconfigdata` (including accidental credentials). The pinned
+`rustpython-derive-impl 0.5.0` source patch under `patches/` sorts `py_freeze!` module traversal and
+every map/set-backed macro token emission instead of compiling randomly seeded collection order, so
+the shared workflow's byte-for-byte rebuild from a clean checkout matches.
 
-The official Wasm is always distributed with a versioned corresponding-source/relink archive and
-CycloneDX SBOM. The archive carries this exact application source, WIT and lockfile plus the
-complete versioned source of every Cargo dependency and an offline source replacement. Build and
-verify it with pinned `cargo-cyclonedx` 0.5.9:
-
-```console
-version=$(cargo metadata --locked --no-deps --format-version 1 |
-  jq -er '.packages[] | select(.name == "dekopon-python-provider") | .version')
-./scripts/build-source-bundle.sh dist
-./scripts/test-source-bundle-reproducibility.sh dist
-./scripts/test-source-bundle-relink.sh \
-  "dist/dekopon-python-provider-$version-relink-source.tar.gz" \
-  "dist/dekopon-python-provider-$version.cdx.json"
-```
-
-See [RELINKING.md](RELINKING.md) for recipient modification, rebuild, componentization, and
-installation instructions. Generated archives, SBOMs, vendor trees, checksums, temporary build
-trees, and Wasm remain ignored and absent from Git.
+The official Wasm is always distributed with a CycloneDX SBOM, generated by the shared release
+workflow as a release asset rather than a local or tracked file. There is no local `scripts/`
+directory or `build.sh` in this repository anymore.
 
 ## The `python` command word
 
@@ -97,7 +84,8 @@ in — `python <<'EOF' … EOF` matches CPython's own read of a non-tty stdin wh
 Outside a Dekopon shell there is no command-line host for this component. Two things can run it.
 
 The component has zero imports, so Wasmtime executes it directly. This is the quickest check that a
-build works, and it is what `scripts/test-wasmtime-smoke.sh` does:
+build works, and it is what the shared CI's raw wasmtime smoke step and
+`tests/broker.rs::raw_smoke_describe_and_eval_match_the_deleted_script` do:
 
 ```console
 wasmtime run --invoke 'describe()' ./python-provider.wasm
@@ -236,27 +224,19 @@ lookup, proposal submission, shell commands, persistence, or privileged imports.
 
 ## Validation
 
-```console
-cargo +1.98.1 fmt --all -- --check
-cargo +1.98.1 clippy --locked --all-targets -- -D warnings
-cargo +1.98.1 test --locked --all-targets
-cargo deny check licenses advisories bans sources
-./scripts/validate.sh
-./scripts/prepare-release-assets.sh
-./scripts/test-source-bundle-reproducibility.sh dist
-./scripts/test-source-bundle-relink.sh
-```
+Formatting, clippy, `cargo deny`, the reproducible component build, and the test suite are all
+gated by the shared `ci / validate` workflow rather than local scripts; see [Build](#build) for
+the exact commands it runs.
 
 ## License and corresponding source
 
 Original source authored by this project remains **MIT OR Apache-2.0** (`LICENSE-MIT` and
 `LICENSE-APACHE`). The distributed combined Wasm embeds four Malachite 0.9.2 packages under
-**LGPL-3.0-only**. This does not relicense the original project source, but the embedded code and
-combined distribution carry the applicable third-party terms. Prominent notices and exact package
-checksums are in `THIRD_PARTY_NOTICES.md`; verbatim GNU texts are in `LICENSE-LGPL-3.0` and
-`LICENSE-GPL-3.0` (with `LICENSE-LGPL-2.1` for the locked `r-efi` source packages).
+**LGPL-3.0-only** and `r-efi` under **LGPL-2.1-or-later**; `deny.toml`'s named exceptions disclose
+them. This does not relicense the original project source, but the embedded code and combined
+distribution carry the applicable third-party terms. Verbatim GNU texts are in `LICENSE-LGPL-3.0`
+and `LICENSE-GPL-3.0` (with `LICENSE-LGPL-2.1` for the locked `r-efi` source packages).
 
-Every binary release provides freely accessible exact corresponding source and relinking material
-both as GitHub Release assets and at
-`ghcr.io/dekopon-agents/provider-python-source:<version>`. See `RELINKING.md`. No `latest` tag is
-published.
+Corresponding source is the public tagged source tree itself, reproducibly rebuilt by the shared
+`ci / validate` and release workflows; the CycloneDX SBOM published with each release lists every
+embedded package. No `latest` tag is published.
