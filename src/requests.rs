@@ -1,6 +1,6 @@
 //! Native buffered HTTP facade. Only the broker import supplies transport or authority.
 use rustpython_vm::{
-    PyPayload, PyResult, TryFromObject, VirtualMachine,
+    PyPayload, PyResult, VirtualMachine,
     builtins::{PyBaseExceptionRef, PyTypeRef, PyUtf8StrRef},
 };
 
@@ -14,23 +14,27 @@ pub(crate) mod requests_module {
 
     #[pyattr(name = "RequestException", once)]
     fn error(vm: &VirtualMachine) -> PyTypeRef {
-        vm.ctx.new_exception_type(
+        crate::exception::immutable_exception_type(
+            vm,
             "dekopon_requests",
             "RequestException",
-            Some(vec![vm.ctx.exceptions.exception_type.to_owned()]),
+            vm.ctx.exceptions.exception_type.to_owned(),
         )
     }
 
     #[pyattr(name = "HTTPError", once)]
     fn http_error(vm: &VirtualMachine) -> PyTypeRef {
-        vm.ctx
-            .new_exception_type("dekopon_requests", "HTTPError", Some(vec![error(vm)]))
+        crate::exception::immutable_exception_type(vm, "dekopon_requests", "HTTPError", error(vm))
     }
 
     #[pyattr(name = "JSONDecodeError", once)]
     fn json_error(vm: &VirtualMachine) -> PyTypeRef {
-        vm.ctx
-            .new_exception_type("dekopon_requests", "JSONDecodeError", Some(vec![error(vm)]))
+        crate::exception::immutable_exception_type(
+            vm,
+            "dekopon_requests",
+            "JSONDecodeError",
+            error(vm),
+        )
     }
 
     #[pyattr]
@@ -68,11 +72,13 @@ pub(crate) mod requests_module {
             // serde_json's default recursion ceiling bounds parsing before the provider's tighter
             // safe-value walk. No Python decoder hooks or custom coercions are invoked.
             let value: serde_json::Value = serde_json::from_slice(&self.body)
-                .map_err(|_| exception(vm, "JSONDecodeError", "invalid JSON response"))?;
-            let value = crate::value::safe_json_to_py(&value, vm);
-            crate::value::py_to_safe_json(&value, vm).map_err(|_| {
-                exception(vm, "JSONDecodeError", "JSON exceeds the safe-value limits")
+                .map_err(|_| exception(vm, json_error(vm), "invalid JSON response"))?;
+            validate_json_numbers(&value).map_err(|()| {
+                exception(vm, json_error(vm), "JSON exceeds the safe-value limits")
             })?;
+            let value = crate::value::safe_json_to_py(&value, vm);
+            crate::value::py_to_safe_json(&value, vm)
+                .map_err(|_| exception(vm, json_error(vm), "JSON exceeds the safe-value limits"))?;
             Ok(value)
         }
 
@@ -81,7 +87,7 @@ pub(crate) mod requests_module {
             if self.status >= 400 {
                 return Err(exception(
                     vm,
-                    "HTTPError",
+                    http_error(vm),
                     &format!("HTTP status {}", self.status),
                 ));
             }
@@ -147,6 +153,131 @@ pub(crate) mod requests_module {
         }
 
         #[test]
+        fn native_exception_factories_ignore_guest_attributes_across_interpreters() {
+            std::thread::Builder::new()
+                .stack_size(32 * 1024 * 1024)
+                .spawn(|| {
+                    for _ in 0..3 {
+                        crate::eval::interpreter().enter(|vm| {
+                            let scope = vm.new_scope_with_builtins();
+                            vm.run_code_string(
+                                scope.clone(),
+                                "import dekopon_requests",
+                                "<response-type-init>".to_owned(),
+                            )
+                            .unwrap();
+                            scope
+                                .globals
+                                .set_item(
+                                    "response",
+                                    vm.new_pyobj(Response {
+                                        status: 404,
+                                        body: b"invalid".to_vec(),
+                                    }),
+                                    vm,
+                                )
+                                .unwrap();
+                            vm.run_code_string(
+                                scope,
+                                r#"
+import dekopon_requests as r
+base = r.RequestException
+for name, call in [('RequestException', lambda: r.get('')),
+                   ('HTTPError', response.raise_for_status),
+                   ('JSONDecodeError', response.json)]:
+    original = getattr(r, name)
+    assert issubclass(original, base)
+    assert not hasattr(original, 'marker')
+    try:
+        original.marker = 'leak'
+    except TypeError:
+        pass
+    else:
+        raise AssertionError('mutable class')
+    class Malicious(original):
+        def __new__(cls, *args):
+            raise AssertionError('guest constructor')
+        def __init__(self, *args):
+            raise AssertionError('guest initializer')
+    for replacement in [original, int, 42, Malicious, None]:
+        if replacement is None:
+            delattr(r, name)
+        else:
+            setattr(r, name, replacement)
+        try:
+            call()
+        except original as error:
+            assert type(error) is original
+        else:
+            raise AssertionError('missing error')
+"#,
+                                "<exception-regression>".to_owned(),
+                            )
+                            .unwrap();
+                        });
+                    }
+                })
+                .unwrap()
+                .join()
+                .unwrap();
+        }
+
+        #[test]
+        fn json_integer_tokens_never_round_into_floats() {
+            std::thread::Builder::new()
+                .stack_size(32 * 1024 * 1024)
+                .spawn(|| {
+                    crate::eval::interpreter().enter(|vm| {
+                        for token in [
+                            "18446744073709551617",
+                            "-9223372036854775809",
+                            "9007199254740992",
+                            "-9007199254740992",
+                            "1e400",
+                        ] {
+                            for body in [token.to_owned(), format!("{{\"nested\":[{token}]}}")] {
+                                assert!(
+                                    Response {
+                                        status: 200,
+                                        body: body.into_bytes()
+                                    }
+                                    .json(vm)
+                                    .is_err(),
+                                    "{token}"
+                                );
+                            }
+                        }
+                        for token in [
+                            "9007199254740991",
+                            "-9007199254740991",
+                            "9007199254740990",
+                            "-9007199254740990",
+                            "9007199254740992.0",
+                            "-9007199254740992.0",
+                            "1e30",
+                            "1.25",
+                        ] {
+                            let value = Response {
+                                status: 200,
+                                body: token.as_bytes().to_vec(),
+                            }
+                            .json(vm)
+                            .expect(token);
+                            let value = crate::value::py_to_safe_json(&value, vm).unwrap();
+                            if token.contains(['.', 'e']) {
+                                assert!(value.as_number().unwrap().is_f64(), "{token}");
+                            } else {
+                                assert_eq!(value.as_i64().unwrap(), token.parse::<i64>().unwrap());
+                            }
+                        }
+                    });
+                })
+                .unwrap()
+                .join()
+                .unwrap();
+        }
+
+        #[test]
         fn http_wit_matches_the_published_guest_binding() {
             assert_eq!(
                 include_str!("../wit/http/http.wit"),
@@ -157,23 +288,15 @@ pub(crate) mod requests_module {
 
     fn request(method: &str, url: &str, vm: &VirtualMachine) -> PyResult<Response> {
         if url.len() > URL_BYTES {
-            return Err(exception(
-                vm,
-                "RequestException",
-                "URL exceeds 8192 UTF-8 bytes",
-            ));
+            return Err(exception(vm, error(vm), "URL exceeds 8192 UTF-8 bytes"));
         }
         let request = dekopon_provider_http::Request::new(method, url)
-            .map_err(|_| exception(vm, "RequestException", "invalid URL"))?;
+            .map_err(|_| exception(vm, error(vm), "invalid URL"))?;
         let response = dekopon_provider_http::send(request)
             // Stable code only: never copy remote text, URL, or potentially sensitive host detail.
-            .map_err(|error| exception(vm, "RequestException", error.code.as_str()))?;
+            .map_err(|failure| exception(vm, error(vm), failure.code.as_str()))?;
         if response.body.len() > BODY_BYTES {
-            return Err(exception(
-                vm,
-                "RequestException",
-                "response exceeds 131072 bytes",
-            ));
+            return Err(exception(vm, error(vm), "response exceeds 131072 bytes"));
         }
         Ok(Response {
             status: response.status,
@@ -182,15 +305,33 @@ pub(crate) mod requests_module {
     }
 }
 
-fn exception(vm: &VirtualMachine, name: &'static str, message: &str) -> PyBaseExceptionRef {
-    let class = vm
-        .sys_module
-        .get_attr("modules", vm)
-        .and_then(|modules| modules.get_item("dekopon_requests", vm))
-        .and_then(|module| module.get_attr(name, vm))
-        .and_then(|class| PyTypeRef::try_from_object(vm, class));
-    match class {
-        Ok(class) => vm.new_exception_msg(class, message.to_owned().into()),
-        Err(_) => vm.new_runtime_error(message.to_owned()),
+fn exception(vm: &VirtualMachine, class: PyTypeRef, message: &str) -> PyBaseExceptionRef {
+    vm.new_exception_msg(class, message.to_owned().into())
+}
+
+// arbitrary_precision preserves integer tokens that serde_json would otherwise round to f64.
+// Validate before safe_json_to_py; decimal/exponent tokens remain legitimate finite floats.
+fn validate_json_numbers(value: &serde_json::Value) -> Result<(), ()> {
+    use serde_json::Value;
+    match value {
+        Value::Number(number) => {
+            let token = number.to_string();
+            if token.contains(['.', 'e', 'E']) {
+                number
+                    .as_f64()
+                    .filter(|value| value.is_finite())
+                    .ok_or(())?;
+            } else {
+                let integer = number.as_i64().ok_or(())?;
+                let max = crate::limits::MAX_SAFE_INTEGER;
+                if !(-max..=max).contains(&integer) {
+                    return Err(());
+                }
+            }
+            Ok(())
+        }
+        Value::Array(values) => values.iter().try_for_each(validate_json_numbers),
+        Value::Object(values) => values.values().try_for_each(validate_json_numbers),
+        _ => Ok(()),
     }
 }

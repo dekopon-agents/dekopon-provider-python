@@ -74,6 +74,7 @@ impl Server {
                     "/two" => (200, b"{\"value\":3}".to_vec(), ""),
                     "/redirect" => (302, Vec::new(), "Location: /never\r\n"),
                     "/invalid" => (200, b"not json".to_vec(), ""),
+                    path if path.starts_with("/json/") => (200, path[6..].as_bytes().to_vec(), ""),
                     "/utf8" => (200, vec![255], ""),
                     "/large" => (200, vec![b'x'; 140_000], ""),
                     "/protocol" => {
@@ -305,6 +306,73 @@ result = [r.status_code, r.ok, h.status_code, len(h.content)]
         let output = invoke(&broker, &server, script, grant(&server)).await;
         assert_eq!(output["error"]["type"], kind, "{script}: {output}");
         assert!(output["error"]["message"].as_str().unwrap().len() <= 2048);
+    }
+    for (name, call) in [
+        ("RequestException", "requests.get('')"),
+        (
+            "HTTPError",
+            "requests.get(base + '/missing').raise_for_status()",
+        ),
+        ("JSONDecodeError", "requests.get(base + '/invalid').json()"),
+    ] {
+        let script = format!(
+            r#"
+original = requests.{name}
+class Malicious(original):
+    def __new__(cls, *args):
+        raise AssertionError('guest constructor')
+    def __init__(self, *args):
+        raise AssertionError('guest initializer')
+for replacement in [original, int, 42, Malicious, None]:
+    if replacement is None:
+        del requests.{name}
+    else:
+        requests.{name} = replacement
+    try:
+        {call}
+    except original as error:
+        assert type(error) is original
+    else:
+        raise AssertionError('missing error')
+result = True
+"#
+        );
+        let output = invoke(&broker, &server, &script, grant(&server)).await;
+        assert_eq!(output["result"], true, "{output}");
+    }
+    for token in [
+        "18446744073709551617",
+        "-9223372036854775809",
+        "9007199254740992",
+        "-9007199254740992",
+    ] {
+        for body in [token.to_owned(), format!("[{token}]")] {
+            let script = format!("requests.get(base + '/json/{body}').json()");
+            let output = invoke(&broker, &server, &script, grant(&server)).await;
+            assert_eq!(
+                output["error"]["type"], "JSONDecodeError",
+                "{body}: {output}"
+            );
+        }
+    }
+    for token in [
+        "9007199254740991",
+        "-9007199254740991",
+        "9007199254740990",
+        "-9007199254740990",
+        "9007199254740992.0",
+        "-9007199254740992.0",
+        "1e30",
+        "1.25",
+    ] {
+        let script = format!("result = requests.get(base + '/json/{token}').json()");
+        let output = invoke(&broker, &server, &script, grant(&server)).await;
+        assert_eq!(output["ok"], true, "{token}: {output}");
+        assert_eq!(
+            output["result"],
+            serde_json::from_str::<Value>(token).unwrap(),
+            "{token}"
+        );
     }
     let mut constraints = grant(&server);
     constraints.http.as_mut().unwrap().max_response_bytes = 128;
