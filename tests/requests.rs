@@ -2,7 +2,8 @@
 //! FakeBroker currently grants no HTTP; its registry exposes the same real invocation path.
 use dekopon_capability::{HttpConstraints, broker::AuthorizationGate};
 use dekopon_provider_sdk_testkit::{
-    Actor, BrokerHostLimits, ExecutionConstraints, FakeBroker, ProposedInvocation, TraceId,
+    Actor, BrokerHostError, BrokerHostLimits, BrokerInvocationFailure, ExecutionConstraints,
+    FakeBroker, ProposedInvocation, TraceId,
 };
 use serde_json::{Value, json};
 use std::{
@@ -121,12 +122,12 @@ fn grant(server: &Server) -> ExecutionConstraints {
         secret_use: None,
     }
 }
-async fn invoke(
+async fn invoke_full(
     broker: &FakeBroker,
     server: &Server,
     script: &str,
     constraints: ExecutionConstraints,
-) -> Value {
+) -> Result<Value, BrokerInvocationFailure> {
     let script = format!(
         "import dekopon_requests as requests\nbase = {:?}\n{script}",
         format!("http://{}", server.authority)
@@ -154,8 +155,24 @@ async fn invoke(
         .registry()
         .invoke(authorized, None)
         .await
+        .map(|output| output.output)
+}
+
+async fn invoke(
+    broker: &FakeBroker,
+    server: &Server,
+    script: &str,
+    constraints: ExecutionConstraints,
+) -> Value {
+    invoke_full(broker, server, script, constraints)
+        .await
         .unwrap()
-        .output
+}
+fn rejected(error: BrokerInvocationFailure, expected: &str) {
+    match *error.error {
+        BrokerHostError::HostCallRejected { reason, .. } => assert_eq!(reason, expected),
+        error => panic!("expected host rejection {expected}, got {error:?}"),
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -180,9 +197,12 @@ async fn requests_component_enforces_each_host_grant_and_bounds_the_facade()
         .build()
         .await?;
     let server = Server::start();
-    let no_grant = broker.invoke("python.eval-http", json!({"script": format!("import dekopon_requests as requests\nrequests.get('http://{}/index')", server.authority)})).await?;
-    assert_eq!(no_grant["error"]["type"], "RequestException", "{no_grant}");
-    assert_eq!(no_grant["error"]["message"], "denied");
+    let no_grant = broker.invoke("python.eval-http", json!({"script": format!("import dekopon_requests as requests\nrequests.get('http://{}/index')", server.authority)})).await.expect_err("no HTTP grant");
+    assert!(
+        format!("{no_grant:?}").contains("HostCallRejected"),
+        "{no_grant}"
+    );
+    assert!(no_grant.to_string().contains("denied"));
     assert_eq!(server.count(), 0);
 
     let output = invoke(
@@ -213,19 +233,19 @@ result = [total, index.status_code, index.ok, type(index.content) is bytes, type
         } else {
             http.allowed_methods = vec!["HEAD".into()];
         }
-        let output = invoke(
+        let output = invoke_full(
             &broker,
             &server,
             "requests.get(base + '/index')",
             constraints,
         )
         .await;
-        assert_eq!(output["error"]["message"], "denied", "{change}: {output}");
+        rejected(output.expect_err("out of scope"), "denied");
     }
     assert_eq!(server.count(), 3);
     let mut constraints = grant(&server);
     constraints.http.as_mut().unwrap().max_requests = 1;
-    let output = invoke(
+    let output = invoke_full(
         &broker,
         &server,
         r#"
@@ -238,10 +258,9 @@ result = errors
         constraints,
     )
     .await;
-    assert_eq!(
-        output["result"],
-        json!(["host-call-limit", "host-call-limit", "host-call-limit"]),
-        "{output}"
+    rejected(
+        output.expect_err("caught exhaustion remains fatal"),
+        "host-call-limit",
     );
     assert_eq!(server.count(), 4);
 
@@ -276,10 +295,6 @@ result = [r.status_code, r.ok, h.status_code, len(h.content)]
         ),
         ("requests.get(base + '/large')", "RequestException"),
         ("requests.get(base + '/protocol')", "RequestException"),
-        (
-            "requests.get('http://user:password@localhost/')",
-            "RequestException",
-        ),
         ("requests.get(base, allow_redirects=True)", "TypeError"),
         ("requests.get(1)", "TypeError"),
     ] {
@@ -289,14 +304,25 @@ result = [r.status_code, r.ok, h.status_code, len(h.content)]
     }
     let mut constraints = grant(&server);
     constraints.http.as_mut().unwrap().max_response_bytes = 128;
-    let output = invoke(
+    let output = invoke_full(
         &broker,
         &server,
         "requests.get(base + '/large')",
         constraints,
     )
     .await;
-    assert_eq!(output["error"]["message"], "response-too-large", "{output}");
+    rejected(
+        output.expect_err("host response byte ceiling"),
+        "byte-limit",
+    );
+    let output = invoke_full(
+        &broker,
+        &server,
+        "requests.get('http://user:password@localhost/')",
+        grant(&server),
+    )
+    .await;
+    rejected(output.expect_err("URI credentials"), "invalid-http-request");
     let output = invoke(
         &broker,
         &server,

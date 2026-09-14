@@ -327,3 +327,13 @@ Every binary release provides freely accessible exact corresponding source and r
 both as GitHub Release assets and at
 `ghcr.io/dekopon-agents/provider-python-source:<version>`. See `RELINKING.md`. No `latest` tag is
 published.
+
+### Sticky host HTTP refusals
+
+In the HTTP variant, policy violations (including absent/wrong grants), malformed host requests,
+and host byte/call-budget exhaustion mark the invocation rejected. Although `send` returns a typed
+error to Python, the real broker checks that sticky state after guest execution and returns
+`HostCallRejected` instead of a successful guest envelope, even if the script catches the exception.
+Transport/protocol failures and provider-local JSON/status/body-limit errors do not replenish any
+budget but are ordinary bounded guest exceptions. A `maxResponseBytes` host refusal is a host error;
+the provider's smaller body cap is checked only after a host-accepted response.
