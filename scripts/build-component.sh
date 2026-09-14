@@ -11,8 +11,8 @@ source "$root/scripts/lib-sha256.sh"
 source "$root/scripts/lib-release-assets.sh"
 variant=${2:-offline}
 case "$variant" in
-  offline) artifact=python-provider; features=(); assertion=assert-zero-core-imports.sh ;;
-  http) artifact=python-http-provider; features=(--features http); assertion=assert-http-imports.sh ;;
+  offline) artifact=python-provider; features=(--no-default-features); assertion=assert-zero-core-imports.sh ;;
+  http) artifact=python-http-provider; features=(--no-default-features --features http); assertion=assert-http-imports.sh ;;
   *) echo "error: variant must be offline or http" >&2; exit 1 ;;
 esac
 component=${1:-"$root/$artifact.wasm"}
