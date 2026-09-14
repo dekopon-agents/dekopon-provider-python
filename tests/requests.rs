@@ -18,6 +18,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+include!("fixtures/requests_json_objects.rs");
+
 struct Server {
     authority: String,
     seen: Arc<Mutex<Vec<String>>>,
@@ -34,6 +36,7 @@ impl Server {
         let recorded = seen.clone();
         let stopping = stop.clone();
         let thread = thread::spawn(move || {
+            let objects = json_object_cases();
             let deadline = Instant::now() + Duration::from_secs(90);
             while !stopping.load(Ordering::Relaxed) && Instant::now() < deadline {
                 let (mut stream, _) = match listener.accept() {
@@ -74,6 +77,31 @@ impl Server {
                     "/two" => (200, b"{\"value\":3}".to_vec(), ""),
                     "/redirect" => (302, Vec::new(), "Location: /never\r\n"),
                     "/invalid" => (200, b"not json".to_vec(), ""),
+                    path if path.starts_with("/json-object/") => {
+                        let index: usize =
+                            path.strip_prefix("/json-object/").unwrap().parse().unwrap();
+                        (200, objects[index].0.as_bytes().to_vec(), "")
+                    }
+                    "/json-depth-ok" => (
+                        200,
+                        format!("{}0{}", "[".repeat(31), "]".repeat(31)).into_bytes(),
+                        "",
+                    ),
+                    "/json-depth-exceeded" => (
+                        200,
+                        format!("{}0{}", "[".repeat(32), "]".repeat(32)).into_bytes(),
+                        "",
+                    ),
+                    "/json-nodes-ok" => (200, format!("[{}0]", "0,".repeat(9998)).into_bytes(), ""),
+                    "/json-nodes-exceeded" => {
+                        (200, format!("[{}0]", "0,".repeat(9999)).into_bytes(), "")
+                    }
+                    "/json-body-ok" => {
+                        (200, format!("\"{}\"", "x".repeat(131070)).into_bytes(), "")
+                    }
+                    "/json-body-exceeded" => {
+                        (200, format!("\"{}\"", "x".repeat(131071)).into_bytes(), "")
+                    }
                     path if path.starts_with("/json/") => (200, path.as_bytes()[6..].to_vec(), ""),
                     "/utf8" => (200, vec![255], ""),
                     "/large" => (200, vec![b'x'; 140_000], ""),
@@ -318,6 +346,17 @@ result = [r.status_code, r.ok, h.status_code, len(h.content)]
         let script = format!(
             r#"
 original = requests.{name}
+assert original.__annotations__ == {{}}
+original.__annotations__['marker'] = 'guest state'
+bases, mro = original.__bases__, original.__mro__
+for attribute, value in [('__bases__', (Exception,)), ('__mro__', (Exception,))]:
+    try:
+        setattr(original, attribute, value)
+    except (TypeError, AttributeError):
+        pass
+    else:
+        raise AssertionError('mutable native layout')
+assert original.__bases__ == bases and original.__mro__ == mro
 class Malicious(original):
     def __new__(cls, *args):
         raise AssertionError('guest constructor')
@@ -345,6 +384,8 @@ result = True
         "-9223372036854775809",
         "9007199254740992",
         "-9007199254740992",
+        "1e400",
+        "-1e400",
     ] {
         for body in [token.to_owned(), format!("[{token}]")] {
             let script = format!("requests.get(base + '/json/{body}').json()");
@@ -364,6 +405,9 @@ result = True
         "-9007199254740992.0",
         "1e30",
         "1.25",
+        "1E+30",
+        "1e-400",
+        "-0",
     ] {
         let script = format!("result = requests.get(base + '/json/{token}').json()");
         let output = invoke(&broker, &server, &script, grant(&server)).await;
@@ -373,6 +417,28 @@ result = True
             serde_json::from_str::<Value>(token).unwrap(),
             "{token}"
         );
+    }
+    for (index, (body, expected)) in json_object_cases().into_iter().enumerate() {
+        let script = format!("result = requests.get(base + '/json-object/{index}').json()");
+        let output = invoke(&broker, &server, &script, grant(&server)).await;
+        assert_eq!(output["ok"], true, "{body}: {output}");
+        assert_eq!(output["result"], expected, "{body}: {output}");
+    }
+    for (path, error) in [
+        ("json-depth-ok", None),
+        ("json-depth-exceeded", Some("JSONDecodeError")),
+        ("json-nodes-ok", None),
+        ("json-nodes-exceeded", Some("JSONDecodeError")),
+        ("json-body-ok", None),
+        ("json-body-exceeded", Some("RequestException")),
+    ] {
+        let script = format!("requests.get(base + '/{path}').json()\nresult = True");
+        let output = invoke(&broker, &server, &script, grant(&server)).await;
+        if let Some(error) = error {
+            assert_eq!(output["error"]["type"], error, "{path}: {output}");
+        } else {
+            assert_eq!(output["result"], true, "{path}: {output}");
+        }
     }
     let mut constraints = grant(&server);
     constraints.http.as_mut().unwrap().max_response_bytes = 128;

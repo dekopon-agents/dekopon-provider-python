@@ -1,0 +1,86 @@
+// Explicit constructed expectations: do not use the decoder under test as its own oracle.
+fn json_object_cases() -> Vec<(&'static str, serde_json::Value)> {
+    use serde_json::json;
+    vec![
+        (
+            r#"{"$serde_json::private::Number":"123"}"#,
+            json!({"$serde_json::private::Number":"123"}),
+        ),
+        (
+            r#"{"nested":{"$serde_json::private::Number":"123"}}"#,
+            json!({"nested":{"$serde_json::private::Number":"123"}}),
+        ),
+        (
+            r#"{"$serde_json::private::Number":"123","extra":true}"#,
+            json!({"$serde_json::private::Number":"123","extra":true}),
+        ),
+        (
+            r#"{"extra":true,"$serde_json::private::Number":"123"}"#,
+            json!({"extra":true,"$serde_json::private::Number":"123"}),
+        ),
+        (
+            r#"{"\u0024serde_json::private::Number":"123"}"#,
+            json!({"$serde_json::private::Number":"123"}),
+        ),
+        (
+            r#"{"$serde_json::private::\u004eumber":"not a number","extra":false}"#,
+            json!({"$serde_json::private::Number":"not a number","extra":false}),
+        ),
+        (
+            r#"{"$serde_json::private::Number":123}"#,
+            json!({"$serde_json::private::Number":123}),
+        ),
+        (
+            r#"{"$serde_json::private::Number":null}"#,
+            json!({"$serde_json::private::Number":null}),
+        ),
+        (
+            r#"{"$serde_json::private::Number":false}"#,
+            json!({"$serde_json::private::Number":false}),
+        ),
+        (
+            r#"{"$serde_json::private::Number":[true,null,"123"]}"#,
+            json!({"$serde_json::private::Number":[true,null,"123"]}),
+        ),
+        (
+            r#"[{"$serde_json::private::Number":{"$serde_json::private::Number":"1e400"}}]"#,
+            json!([{"$serde_json::private::Number":{"$serde_json::private::Number":"1e400"}}]),
+        ),
+        (
+            r#"{"$serde_json::private::Number":"18446744073709551617"}"#,
+            json!({"$serde_json::private::Number":"18446744073709551617"}),
+        ),
+        (
+            r#"{"$serde_json::private::RawValue":"123"}"#,
+            json!({"$serde_json::private::RawValue":"123"}),
+        ),
+        (
+            r#"{"$serde_json::private::RawValue":null,"extra":true}"#,
+            json!({"$serde_json::private::RawValue":null,"extra":true}),
+        ),
+        (
+            r#"{"extra":true,"\u0024serde_json::private::RawValue":[{"$serde_json::private::RawValue":"1e400"}]}"#,
+            json!({"extra":true,"$serde_json::private::RawValue":[{"$serde_json::private::RawValue":"1e400"}]}),
+        ),
+        (
+            r#"{"extra":{"$serde_json::private::Number":"NaN"},"$serde_json::private::Number":{}}"#,
+            json!({"extra":{"$serde_json::private::Number":"NaN"},"$serde_json::private::Number":{}}),
+        ),
+        (
+            r#"{"18446744073709551617":"-9223372036854775809"}"#,
+            json!({"18446744073709551617":"-9223372036854775809"}),
+        ),
+        (
+            r#"["\"18446744073709551617",9007199254740991]"#,
+            json!(["\"18446744073709551617", 9007199254740991_i64]),
+        ),
+        (
+            r#"["\\",-9007199254740991,"\\\"1e400"]"#,
+            json!(["\\", -9007199254740991_i64, "\\\"1e400"]),
+        ),
+        (
+            r#"{"\u0031":"\u003918446744073709551617"}"#,
+            json!({"1":"918446744073709551617"}),
+        ),
+    ]
+}

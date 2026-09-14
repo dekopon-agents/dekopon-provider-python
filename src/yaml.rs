@@ -328,17 +328,34 @@ mod tests {
     use crate::limits::{MAX_DEPTH, MAX_SAFE_INTEGER, YAML_BYTES};
 
     #[test]
-    fn yaml_exception_class_is_native_and_immutable_across_interpreters() {
+    fn yaml_exception_selection_and_layout_survive_shared_annotations() {
         std::thread::Builder::new()
             .stack_size(32 * 1024 * 1024)
             .spawn(|| {
-                for _ in 0..3 {
+                for iteration in 0..3 {
                     crate::eval::interpreter().enter(|vm| {
+                        let scope = vm.new_scope_with_builtins();
+                        scope
+                            .globals
+                            .set_item("iteration", vm.new_pyobj(iteration), vm)
+                            .unwrap();
                         vm.run_string(
-                            vm.new_scope_with_builtins(),
+                            scope,
                             r#"
 import yaml
 original = yaml.YAMLError
+annotations = original.__annotations__
+assert annotations.get('marker', 0) == iteration
+annotations['marker'] = iteration + 1
+bases, mro = original.__bases__, original.__mro__
+for attribute, value in [('__bases__', (Exception,)), ('__mro__', (Exception,))]:
+    try:
+        setattr(original, attribute, value)
+    except (TypeError, AttributeError):
+        pass
+    else:
+        raise AssertionError('mutable native layout')
+assert original.__bases__ == bases and original.__mro__ == mro
 try:
     original.marker = 'leak'
 except TypeError:

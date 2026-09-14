@@ -69,13 +69,20 @@ pub(crate) mod requests_module {
 
         #[pymethod]
         fn json(&self, vm: &VirtualMachine) -> PyResult {
-            // serde_json's default recursion ceiling bounds parsing before the provider's tighter
-            // safe-value walk. No Python decoder hooks or custom coercions are invoked.
-            let value: serde_json::Value = serde_json::from_slice(&self.body)
-                .map_err(|_| exception(vm, json_error(vm), "invalid JSON response"))?;
-            validate_json_numbers(&value).map_err(|()| {
+            if self.body.len() > BODY_BYTES {
+                return Err(exception(
+                    vm,
+                    json_error(vm),
+                    "JSON exceeds the safe-value limits",
+                ));
+            }
+            validate_json_integer_lexemes(&self.body).map_err(|()| {
                 exception(vm, json_error(vm), "JSON exceeds the safe-value limits")
             })?;
+            // serde remains the JSON grammar authority, with its default recursion ceiling.
+            // No synthetic-number/raw-value features or guest decoder hooks are enabled.
+            let value: serde_json::Value = serde_json::from_slice(&self.body)
+                .map_err(|_| exception(vm, json_error(vm), "invalid JSON response"))?;
             let value = crate::value::safe_json_to_py(&value, vm);
             crate::value::py_to_safe_json(&value, vm)
                 .map_err(|_| exception(vm, json_error(vm), "JSON exceeds the safe-value limits"))?;
@@ -108,6 +115,7 @@ pub(crate) mod requests_module {
     #[cfg(test)]
     mod tests {
         use super::*;
+        include!("../tests/fixtures/requests_json_objects.rs");
 
         #[test]
         fn response_status_bytes_utf8_and_safe_json_are_bounded() {
@@ -157,9 +165,13 @@ pub(crate) mod requests_module {
             std::thread::Builder::new()
                 .stack_size(32 * 1024 * 1024)
                 .spawn(|| {
-                    for _ in 0..3 {
+                    for iteration in 0..3 {
                         crate::eval::interpreter().enter(|vm| {
                             let scope = vm.new_scope_with_builtins();
+                            scope
+                                .globals
+                                .set_item("iteration", vm.new_pyobj(iteration), vm)
+                                .unwrap();
                             vm.run_string(
                                 scope.clone(),
                                 "import dekopon_requests",
@@ -188,6 +200,18 @@ for name, call in [('RequestException', lambda: r.get('')),
     original = getattr(r, name)
     assert issubclass(original, base)
     assert not hasattr(original, 'marker')
+    annotations = original.__annotations__
+    assert annotations.get('marker', 0) == iteration
+    annotations['marker'] = iteration + 1
+    bases, mro = original.__bases__, original.__mro__
+    for attribute, value in [('__bases__', (Exception,)), ('__mro__', (Exception,))]:
+        try:
+            setattr(original, attribute, value)
+        except (TypeError, AttributeError):
+            pass
+        else:
+            raise AssertionError('mutable native layout')
+    assert original.__bases__ == bases and original.__mro__ == mro
     try:
         original.marker = 'leak'
     except TypeError:
@@ -234,8 +258,16 @@ for name, call in [('RequestException', lambda: r.get('')),
                             "9007199254740992",
                             "-9007199254740992",
                             "1e400",
+                            "-1e400",
+                            "99999999999999999999999999999999999999999999999999",
                         ] {
-                            for body in [token.to_owned(), format!("{{\"nested\":[{token}]}}")] {
+                            for body in [
+                                token.to_owned(),
+                                format!("{{\"nested\":[{token}]}}"),
+                                format!("{{\"$serde_json::private::Number\":{token}}}"),
+                                format!(r#"["\\",{token}]"#),
+                                format!(r#"["\"",{token}]"#),
+                            ] {
                                 assert!(
                                     Response {
                                         status: 200,
@@ -256,6 +288,9 @@ for name, call in [('RequestException', lambda: r.get('')),
                             "-9007199254740992.0",
                             "1e30",
                             "1.25",
+                            "1E+30",
+                            "1e-400",
+                            "-0",
                         ] {
                             let value = Response {
                                 status: 200,
@@ -264,11 +299,100 @@ for name, call in [('RequestException', lambda: r.get('')),
                             .json(vm)
                             .expect(token);
                             let value = crate::value::py_to_safe_json(&value, vm).unwrap();
-                            if token.contains(['.', 'e']) {
+                            if token.contains(['.', 'e', 'E']) || token == "-0" {
                                 assert!(value.as_number().unwrap().is_f64(), "{token}");
                             } else {
                                 assert_eq!(value.as_i64().unwrap(), token.parse::<i64>().unwrap());
                             }
+                        }
+                    });
+                })
+                .unwrap()
+                .join()
+                .unwrap();
+        }
+
+        #[test]
+        fn json_reserved_key_objects_preserve_json_semantics() {
+            std::thread::Builder::new()
+                .stack_size(32 * 1024 * 1024)
+                .spawn(|| {
+                    crate::eval::interpreter().enter(|vm| {
+                        for (body, expected) in json_object_cases() {
+                            let value = Response {
+                                status: 200,
+                                body: body.as_bytes().to_vec(),
+                            }
+                            .json(vm)
+                            .expect(body);
+                            assert_eq!(
+                                crate::value::py_to_safe_json(&value, vm).unwrap(),
+                                expected,
+                                "{body}"
+                            );
+                        }
+                    });
+                })
+                .unwrap()
+                .join()
+                .unwrap();
+        }
+
+        #[test]
+        fn response_json_enforces_body_depth_node_limits_and_grammar() {
+            use crate::limits::{MAX_DEPTH, MAX_NODES};
+            std::thread::Builder::new()
+                .stack_size(32 * 1024 * 1024)
+                .spawn(|| {
+                    crate::eval::interpreter().enter(|vm| {
+                        for (body, accepted) in [
+                            (
+                                format!(
+                                    "{}0{}",
+                                    "[".repeat(MAX_DEPTH - 1),
+                                    "]".repeat(MAX_DEPTH - 1)
+                                ),
+                                true,
+                            ),
+                            (
+                                format!("{}0{}", "[".repeat(MAX_DEPTH), "]".repeat(MAX_DEPTH)),
+                                false,
+                            ),
+                            (format!("[{}0]", "0,".repeat(MAX_NODES - 2)), true),
+                            (format!("[{}0]", "0,".repeat(MAX_NODES - 1)), false),
+                            (
+                                format!(
+                                    "{{{}}}",
+                                    (0..MAX_NODES / 2)
+                                        .map(|i| format!("\"{i}\":0"))
+                                        .collect::<Vec<_>>()
+                                        .join(",")
+                                ),
+                                false,
+                            ),
+                            (format!("\"{}\"", "x".repeat(BODY_BYTES - 2)), true),
+                            (format!("\"{}\"", "x".repeat(BODY_BYTES - 1)), false),
+                            ("[".repeat(BODY_BYTES), false),
+                            (format!("{}0{}", "[".repeat(1000), "]".repeat(1000)), false),
+                            ("1 2".to_owned(), false),
+                            ("01".to_owned(), false),
+                            ("[1,]".to_owned(), false),
+                            ("1e".to_owned(), false),
+                            ("--1".to_owned(), false),
+                            (r#""\q""#.to_owned(), false),
+                            (r#"{"x":1e400}"#.to_owned(), false),
+                        ] {
+                            assert_eq!(
+                                Response {
+                                    status: 200,
+                                    body: body.as_bytes().to_vec()
+                                }
+                                .json(vm)
+                                .is_ok(),
+                                accepted,
+                                "body length {}",
+                                body.len()
+                            );
                         }
                     });
                 })
@@ -309,29 +433,45 @@ fn exception(vm: &VirtualMachine, class: PyTypeRef, message: &str) -> PyBaseExce
     vm.new_exception_msg(class, message.to_owned().into())
 }
 
-// arbitrary_precision preserves integer tokens that serde_json would otherwise round to f64.
-// Validate before safe_json_to_py; decimal/exponent tokens remain legitimate finite floats.
-fn validate_json_numbers(value: &serde_json::Value) -> Result<(), ()> {
-    use serde_json::Value;
-    match value {
-        Value::Number(number) => {
-            let token = number.to_string();
-            if token.contains(['.', 'e', 'E']) {
-                number
-                    .as_f64()
-                    .filter(|value| value.is_finite())
-                    .ok_or(())?;
-            } else {
-                let integer = number.as_i64().ok_or(())?;
-                let max = crate::limits::MAX_SAFE_INTEGER;
-                if !(-max..=max).contains(&integer) {
+// Preflight only, not a JSON parser: serde subsequently validates all grammar and UTF-8.
+// Scan the bounded body once, skipping strings (including escaped quotes/backslashes), so integer
+// lexemes cannot silently become rounded f64 values. Decimal/exponent tokens are left to serde's
+// finite-float decoding. No serde features that reinterpret actual object keys are needed.
+fn validate_json_integer_lexemes(body: &[u8]) -> Result<(), ()> {
+    let max = crate::limits::MAX_SAFE_INTEGER.to_string();
+    let mut index = 0;
+    let mut in_string = false;
+    while let Some(&byte) = body.get(index) {
+        if in_string {
+            match byte {
+                b'\\' => index += 1, // The escaped byte cannot end the string.
+                b'"' => in_string = false,
+                _ => {}
+            }
+            index += 1;
+        } else if byte == b'"' {
+            in_string = true;
+            index += 1;
+        } else if matches!(byte, b'-' | b'0'..=b'9') {
+            let start = index;
+            while body
+                .get(index)
+                .is_some_and(|byte| matches!(byte, b'0'..=b'9' | b'-' | b'+' | b'.' | b'e' | b'E'))
+            {
+                index += 1;
+            }
+            let token = &body[start..index];
+            if !token.iter().any(|byte| matches!(byte, b'.' | b'e' | b'E')) {
+                let magnitude = token.strip_prefix(b"-").unwrap_or(token);
+                if magnitude.len() > max.len()
+                    || (magnitude.len() == max.len() && magnitude > max.as_bytes())
+                {
                     return Err(());
                 }
             }
-            Ok(())
+        } else {
+            index += 1;
         }
-        Value::Array(values) => values.iter().try_for_each(validate_json_numbers),
-        Value::Object(values) => values.values().try_for_each(validate_json_numbers),
-        _ => Ok(()),
     }
+    Ok(())
 }

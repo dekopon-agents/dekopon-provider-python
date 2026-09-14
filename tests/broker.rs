@@ -96,6 +96,17 @@ async fn broker_runs_success_yaml_denial_and_fresh_state() -> Result<(), Box<dyn
                 json!({"script": r#"
 import yaml
 original = yaml.YAMLError
+assert original.__annotations__ == {}
+original.__annotations__['marker'] = 'guest state'
+bases, mro = original.__bases__, original.__mro__
+for attribute, value in [('__bases__', (Exception,)), ('__mro__', (Exception,))]:
+    try:
+        setattr(original, attribute, value)
+    except (TypeError, AttributeError):
+        pass
+    else:
+        raise AssertionError('mutable native layout')
+assert original.__bases__ == bases and original.__mro__ == mro
 assert not hasattr(original, 'marker')
 try:
     original.marker = 'leak'
