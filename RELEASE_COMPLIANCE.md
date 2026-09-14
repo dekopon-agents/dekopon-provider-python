@@ -135,3 +135,14 @@ without destructive rollback.
 
 Do not tag, push, package, or release until the owner chooses to perform the remaining mechanical
 publication steps. Every annotated `v<version>` tag must be contained in `main`.
+
+## Source-only HTTP feature coverage
+
+The optional `http` feature is not added to the official binary/OCI asset set. It is a recipient
+source-build alternative (`python-http-provider.wasm`, `python.eval-http`) whose combined binary has
+the same LGPL corresponding-source obligations. The complete vendor closure includes the published
+`dekopon-provider-http` guest binding; the SBOM is generated with all features. CI independently
+reproduces the HTTP component and relinks modified Malachite for both feature selections offline.
+The HTTP gates require the exact byte-pinned HTTP WIT and sole raw guest import, plus validated
+component external imports/exports; the default build's strict zero-import assertions are unchanged.
+No dual-binary official release or additional OCI package is authorized by this feature.

@@ -109,3 +109,21 @@ Provider files authored by this project may be copied and modified under either 
 `LICENSE-LGPL-3.0` together with `LICENSE-GPL-3.0`; vendored packages retain their own notices and
 license files. The release archive and source OCI artifact are corresponding-source distribution
 materials and should be retained with any copy of the official Wasm.
+
+## Source-only HTTP alternative
+
+The same exact archive includes the optional `http` feature and its complete dependency closure.
+After modifying Malachite as above, build and verify this alternative offline:
+
+```console
+./scripts/build-component.sh "$PWD/python-http-provider.wasm" http
+./scripts/assert-http-imports.sh python-http-provider.wasm
+sha256sum --check --strict python-http-provider.wasm.sha256
+```
+
+CI performs both modified-source relinks. This variant has one external HTTP interface, not zero
+imports, and cannot run in an empty-linker Wasmtime. Install it instead of the offline component
+under your own digest policy (same provider ID `python` and command word), route `python.eval-http`,
+and configure narrow invocation HTTP grants as described in README. The HTTP artifact is
+source-build-only; the official release/OCI asset set remains the offline binary. The LGPL notice
+and retention obligations above apply equally to a distributed HTTP build.

@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Source-build-only HTTP variant (`http`, `python.eval-http`) with native bounded
+  `dekopon_requests` GET/HEAD facade and real-host grant enforcement tests. Default offline
+  `python.eval` and the official release/OCI asset layout remain unchanged.
+
 ## 0.4.0 - Unreleased
 
 - Move to `dekopon-provider-sdk` 0.15.0 and `dekopon-provider-sdk-testkit` 0.15.0.

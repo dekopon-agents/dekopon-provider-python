@@ -23,6 +23,7 @@ for name in required_rustpython:
         raise SystemExit(f"error: {name} must resolve exactly once at 0.5.0, got {versions.get(name)}")
 required = {
     "dekopon-provider-sdk": {"0.15.0"},
+    "dekopon-provider-http": {"0.15.0"},
     "malachite-base": {"0.9.2"},
     "malachite-bigint": {"0.9.2"},
     "malachite-nz": {"0.9.2"},
@@ -94,7 +95,7 @@ jq -e \
 }
 
 cargo tree --locked --manifest-path "$root/Cargo.toml" \
-  --target wasm32-unknown-unknown -e normal,build --prefix none >"$tree"
+  --all-features --target wasm32-unknown-unknown -e normal,build --prefix none >"$tree"
 if grep -E '^(wasm-bindgen|js-sys|web-sys|wasm-bindgen-futures) v' "$tree"; then
   echo "error: browser/JavaScript package reached the Wasm target graph" >&2
   exit 1
@@ -108,7 +109,7 @@ if grep -E '^(wasi|wasip[0-9]*|wasi-common|wasi-cap-std-sync) v' "$tree"; then
   exit 1
 fi
 cargo tree --locked --manifest-path "$root/Cargo.toml" \
-  --target wasm32-unknown-unknown -e features -f '{p} {f}' >"$features"
+  --all-features --target wasm32-unknown-unknown -e features -f '{p} {f}' >"$features"
 if grep 'rustpython-vm v0.5.0' "$features" | grep -E 'host_env|stdio|threading|wasmbind' >/dev/null; then
   echo "error: forbidden RustPython host feature enabled" >&2
   exit 1

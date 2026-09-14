@@ -11,6 +11,8 @@ test -z "$(git ls-files '*.wasm')"
 cargo +1.98.1 fmt --all -- --check
 cargo +1.98.1 clippy --locked --all-targets -- -D warnings
 cargo +1.98.1 test --locked --all-targets
+cargo +1.98.1 clippy --locked --all-targets --features http -- -D warnings
+cargo +1.98.1 test --locked --lib --features http
 cargo +1.98.1 check --locked --target wasm32-unknown-unknown
 ./scripts/assert-lock-and-feature-graph.sh Cargo.lock
 cargo deny check licenses advisories bans sources
@@ -37,3 +39,6 @@ fi
 ./scripts/measure-final-artifact.sh python-provider.wasm
 sha256sum_check python-provider.wasm.sha256
 ./scripts/validate-workflows-and-release-layout.sh
+
+./scripts/build-component.sh "$root/python-http-provider.wasm" http
+./scripts/test-requests.sh python-http-provider.wasm

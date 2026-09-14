@@ -729,6 +729,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "dekopon-provider-http"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f1f4d513a0365d093ac5d332612430c326664e4ebcd625d536d05594ad4410d"
+dependencies = [
+ "wit-bindgen 0.62.0",
+]
+
+[[package]]
 name = "dekopon-provider-sdk"
 version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -762,6 +771,8 @@ dependencies = [
 name = "dekopon-python-provider"
 version = "0.4.0"
 dependencies = [
+ "dekopon-capability",
+ "dekopon-provider-http",
  "dekopon-provider-sdk",
  "dekopon-provider-sdk-testkit",
  "getrandom 0.3.4",
@@ -4719,6 +4730,7 @@ version = "0.62.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "53cb4b5556c3a791e86838ea287782bdafa704d55b0e68b5b81a3a16b9ea5f4b"
 dependencies = [
+ "bitflags",
  "wit-bindgen-rust-macro",
 ]
 

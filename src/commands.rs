@@ -23,6 +23,7 @@ use crate::{COMMAND_WORD, EVAL};
 const PIPED: &str = "-";
 
 /// What `--help` prints below the options: the contract a model needs before writing a script.
+#[cfg(not(feature = "http"))]
 const AFTER_HELP: &str = "\
 The script is Python 3 source, at most 65,536 UTF-8 bytes. Only json, re, and yaml
 (safe_load, safe_dump) import; there is no filesystem, network, clock, or input().
@@ -41,13 +42,30 @@ Examples:
   result = yaml.safe_load(\"retries: 2\")
   EOF";
 
+#[cfg(feature = "http")]
+const AFTER_HELP: &str =
+    "Source-build-only HTTP variant: proposes python.eval-http, not python.eval.
+Imports json, re, yaml, and dekopon_requests (GET/HEAD only).
+Every HTTP call is constrained by the host invocation grant; no credentials,
+redirects, retries, sockets, filesystem, clock, or input().
+Script: at most 65,536 UTF-8 bytes. print() is bounded to 65,536 bytes.
+Assign a safe JSON-shaped value to result. Runtime output is bounded JSON with
+ok/stdout/stdoutTruncated/result (or error), not an OS exit status.";
+
+#[cfg(not(feature = "http"))]
+pub(crate) const ABOUT: &str =
+    "Run one Python 3 script in a fresh, import-free RustPython 0.5.0 VM";
+#[cfg(feature = "http")]
+pub(crate) const ABOUT: &str =
+    "Run one Python 3 script with broker-granted HTTP in a fresh RustPython 0.5.0 VM";
+
 // The `python` tree, declared once and rendered by clap. Plain comments, not doc comments: clap
 // renders a doc comment as the `about` line above `Usage:`.
 #[derive(Parser)]
 #[command(
     name = COMMAND_WORD,
     version,
-    about = "Run one Python 3 script in a fresh, import-free RustPython 0.5.0 VM",
+    about = ABOUT,
     override_usage = "python -c <CODE>\n       python - <<'EOF'\n       python <<'EOF'",
     after_help = AFTER_HELP,
     group = clap::ArgGroup::new("script").args(["code", "piped"]).required(true),
@@ -143,6 +161,7 @@ mod tests {
 
     /// The help page, byte for byte. It is the only documentation a model reads before writing a
     /// script, so a change to it is a diff a reviewer sees.
+    #[cfg(not(feature = "http"))]
     #[test]
     fn help_is_pinned_byte_for_byte() {
         const HELP: &str = "\

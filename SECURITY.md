@@ -11,7 +11,32 @@ Report suspected vulnerabilities privately through GitHub's security-advisory in
 `dekopon-agents/dekopon-provider-python`. Do not include secrets, production scripts, or private
 provider outputs in a public issue.
 
-## Authority boundary
+## HTTP variant boundary (source-build-only)
+
+Cargo feature `http` replaces the default capability with `python.eval-http` and adds only the
+`dekopon:http/client@1.0.0` external import through published `dekopon-provider-http`. The native
+`dekopon_requests` module exposes GET/HEAD only. It implements no socket/transport, dispatcher,
+proposal engine, redirects, retry, cookie jar, ambient proxy, or credential API. Every call is
+checked against the host's existing invocation grant (not a new Cedar decision). The host enforces
+exact destination/method, DNS/IP policy, cumulative call budget, bounded request/response and timeout;
+catching an exception cannot replenish the host budget. No grant denies all requests. Do not bind
+credentials or secret-use authority to this capability. The provider cannot narrow a compromised
+host; admit the component digest and configure the host limits explicitly.
+
+URLs are capped at 8,192 UTF-8 bytes, response bodies at 131,072 bytes after the host's own
+pre-import byte bound, and JSON uses the existing safe-value limits. Host exception messages are
+reduced to stable error codes; HTTP status and JSON errors use short static diagnostics. Binary
+content stays bytes; text decodes UTF-8 with replacement. Stdout and complete capability output
+retain their existing bounds. Data failures may follow successful network requests and do not imply
+rollback. Resource traps stay host errors. There are no runtime OS-exit semantics.
+
+The source-only HTTP artifact is an alternative to, not co-installable with, the official offline
+artifact: provider ID and command word collide. Its exact WIT and raw core import gates are separate
+from the unchanged zero-import gate. Componentizer adapter imports are internal to the validated
+component; its sole external authority is HTTP. Corresponding-source, SBOM, relink and reproducible
+build checks cover the feature; the official release/OCI layout remains offline-only.
+
+## Default offline authority boundary
 
 The security boundary is the validated component plus a correctly configured Dekopon host, not the
 Python import hook:
@@ -84,7 +109,7 @@ new component. CI performs that modification and clean offline rebuild. The sour
 and component are generated release products and are never trusted merely because they exist in a
 working tree; release gates verify their bytes, manifests, and anonymous retrieval paths.
 
-## Host-enforced termination
+## Host-enforced termination (both variants)
 
 Provider code does **not** enforce instruction fuel, wall time, or linear memory and cannot turn a
 Wasmtime trap into a data envelope. Fuel exhaustion, epoch/Tokio deadline cancellation, memory
@@ -104,7 +129,7 @@ the default as supported.
 Broker defaults retain the same memory/table/count/input/output ceilings, provide 8,000,000,000
 fuel, and accept authorization timeouts no greater than 30 seconds. Every invocation gets a fresh
 store, async yields occur at most every `min(fuel, 10,000)` units, and Tokio applies the timeout.
-The broker linker implements only Dekopon HTTP/storage interfaces; this component imports neither.
+The broker linker implements only Dekopon HTTP/storage interfaces; the default offline component imports neither; the HTTP variant imports only HTTP.
 Use a 5,000 ms authorization timeout and 786,432-byte output authorization.
 
 A 64 MiB memory limit is per linear memory, not process RSS. With no `maxTotalMemoryBytes`, it is
@@ -117,5 +142,5 @@ measurements in `docs/deployment-profile.md`.
 Malformed capability input and unknown capabilities are stable SDK `ProviderError` failures.
 Python syntax, runtime, YAML, and result-conversion failures return bounded data with
 `ok: false`; tracebacks, locals, and stderr are omitted. Host fuel/deadline/memory/output failures
-trap outside that envelope. None of these failures imply that network, filesystem, or another
-provider was contacted: the component has no import through which that could occur.
+trap outside that envelope. For the default offline build, none of these failures imply that network, filesystem, or another
+provider was contacted: it has no such imports. HTTP-enabled failures can follow completed requests.

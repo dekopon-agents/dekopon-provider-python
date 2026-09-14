@@ -1,6 +1,6 @@
 # Dekopon Python provider
 
-An import-free WebAssembly component exposing one read-only, High-risk capability:
+By default, an import-free WebAssembly component exposing one read-only, High-risk capability:
 `python.eval`. It embeds **RustPython 0.5.0 exactly**, creates a fresh interpreter per call,
 captures bounded stdout in Rust, and returns only a bounded JSON-shaped result. A Dekopon shell
 reaches it through the `python` command word. Version 0.4.0 targets `dekopon-provider-sdk` 0.15.0
@@ -12,6 +12,73 @@ load it.
 > provider. This records a project policy choice, not attorney review. Publication still requires
 > the per-repository variable `PROVIDER_PYTHON_RELEASE_APPROVED=true`, an annotated tag, and every
 > transactional release check in `RELEASE_COMPLIANCE.md`.
+
+## Source-build-only HTTP alternative
+
+**The optional HTTP variant is source-build-only, not an official release/OCI binary.** The
+existing release asset set remains the offline `python-provider.wasm`. Build the alternative with:
+
+```console
+./scripts/build-component.sh "$PWD/python-http-provider.wasm" http
+./scripts/assert-http-imports.sh python-http-provider.wasm
+./scripts/test-requests.sh python-http-provider.wasm
+./scripts/reproducible-build.sh http
+```
+
+This selects Cargo feature `http`, capability **`python.eval-http`**, and exactly one external
+import, **`dekopon:http/client@1.0.0`**. Default builds still expose `python.eval`, deny
+`dekopon_requests`, and have zero imports in every core. These are **alternative installations**:
+both identify as provider `python` and claim command word `python`; do not co-install them. The
+HTTP variant's command proposes `python.eval-http` using the same `{"script": ...}` input. Replace
+the selected component under your own digest-admission policy; do not label it an official release.
+A bare empty-linker Wasmtime invocation cannot instantiate this variant.
+
+Configure the broker's route/constraint set for `python.eval-http` with an explicit `http` grant:
+`allowedHosts` (exact authorities, including effective nondefault port), `allowedMethods` (`GET`
+and/or `HEAD`), `maxRequests`, `maxRequestBytes`, and `maxResponseBytes`; keep
+`allowPlaintextLoopback: false` in production. Retain the fuel/memory/timeout/output profile below.
+Do not attach credentials or secret-use bindings. The host enforces this **invocation grant on
+every request**, including destinations computed by the script; there is no new Cedar decision,
+nested proposal engine, or generic dispatch per call. Absent grants deny all calls. Host request
+budget exhaustion stays exhausted even when Python catches its exception. Host DNS/IP validation,
+HTTPS, byte/deadline limits, and redirect refusal remain authoritative. Plain HTTP is only available
+for explicitly granted loopback authorities with explicit ports and the opt-in flag (used by tests).
+
+```python
+import dekopon_requests as requests
+
+base = "https://example.test"
+index = requests.get(base + "/index")
+index.raise_for_status()
+total = 0
+for path in index.json():
+    child = requests.get(base + path)
+    child.raise_for_status()
+    total += child.json()["value"]
+print(total)
+result = total
+```
+
+The native facade is intentionally not the pip `requests` package:
+
+- Only `get(url)` and `head(url)`, with a UTF-8 string URL of at most 8,192 bytes; no optional
+  arguments, headers, body, credentials, cookies, sessions, proxies, retries, or redirect following.
+- `Response.status_code`, `ok` (status below 400), `content` (bytes), `text` (UTF-8 with replacement),
+  `json()` (strict JSON projected through the existing safe-value limits), and `raise_for_status()`
+  (raises at status 400 or above). HEAD content is empty. Redirect statuses are returned unchanged.
+- Buffered response bodies are additionally capped at 131,072 bytes; the host must bound the whole
+  response before it crosses the import. `json()` does not perform requests-style charset detection.
+- `RequestException` is the common base; `HTTPError` and `JSONDecodeError` derive from it. Host
+  failures expose only stable WIT codes such as `denied`, `host-call-limit`, or `response-too-large`,
+  never host diagnostic text or URLs. Provider-generated exceptions carry short bounded messages.
+- Runtime output is the existing JSON `ok/stdout/stdoutTruncated/result` or error envelope, **not an
+  OS exit status**. Stdout and result limits do not increase for HTTP.
+
+The source bundle, all-features SBOM, modified-Malachite offline relink test, feature-graph gate,
+and HTTP reproducibility/import checks cover this build too; official publication remains offline.
+`tests/requests.rs` uses FakeBroker for no-grant denial and its real registry with published
+`AuthorizationGate`/HTTP constraints for the controlled-server tests. It does not test Cedar policy
+selection; it tests production host enforcement of preauthorized grants without a transport mock.
 
 ## Build
 
@@ -96,7 +163,7 @@ in — `python <<'EOF' … EOF` matches CPython's own read of a non-tty stdin wh
 
 Outside a Dekopon shell there is no command-line host for this component. Two things can run it.
 
-The component has zero imports, so Wasmtime executes it directly. This is the quickest check that a
+The default offline component has zero imports, so Wasmtime executes it directly. This is the quickest check that a
 build works, and it is what `scripts/test-wasmtime-smoke.sh` does:
 
 ```console
@@ -174,7 +241,7 @@ Script-level failure data is exactly:
 }
 ```
 
-Kinds are `syntax`, `runtime`, `yaml`, or `result`. No traceback, locals, or stderr are returned.
+Kinds are `syntax`, `runtime`, `yaml`, or `result`; HTTP facade exceptions use `runtime`. No traceback, locals, or stderr are returned.
 Unknown capability and malformed provider input instead use the SDK's stable provider-failure
 envelope. Host resource traps remain host errors.
 
@@ -217,7 +284,7 @@ stdlib/package compatibility, pip, or persistence.
 
 ## Denied authority and determinism
 
-The final component and every nested core have zero imports. There is no WASI, JS/browser, host
+The default offline component and every nested core have zero imports. There is no WASI, JS/browser, host
 environment, filesystem, network, HTTP/storage, clock, entropy, subprocess, dynamic loading, or
 generic provider dispatch. Imports including `sys`, `os`, `time`, `random`, `secrets`, `socket`,
 `ssl`, `sqlite3`, `subprocess`, `threading`, `ctypes`, `tkinter`, and `webbrowser` are denied.

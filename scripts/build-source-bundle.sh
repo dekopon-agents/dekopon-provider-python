@@ -76,6 +76,7 @@ python3 "$stage/scripts/verify-vendored-source.py" "$stage"
   cargo +"$required_rust" metadata --locked --offline --format-version 1 >/dev/null
   SOURCE_DATE_EPOCH=0 cargo +"$required_rust" cyclonedx \
     --manifest-path Cargo.toml \
+    --all-features \
     --format json \
     --spec-version 1.5 \
     --target wasm32-unknown-unknown \
@@ -113,6 +114,7 @@ for name in ("malachite-base", "malachite-bigint", "malachite-nz", "malachite-q"
         raise SystemExit(f"error: SBOM omits {name} 0.9.2")
 manifest = {
     "formatVersion": 1,
+    "buildVariants": ["offline", "http-source-only"],
     "package": "dekopon-python-provider",
     "version": version,
     "gitRevision": revision,
