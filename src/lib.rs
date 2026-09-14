@@ -11,6 +11,7 @@ mod capture;
 mod commands;
 mod entropy;
 mod eval;
+mod exception;
 mod limits;
 mod policy;
 #[cfg(feature = "http")]

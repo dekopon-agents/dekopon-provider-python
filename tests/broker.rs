@@ -89,6 +89,43 @@ async fn broker_runs_success_yaml_denial_and_fresh_state() -> Result<(), Box<dyn
     assert_eq!(denied["ok"], false);
     assert_eq!(denied["error"]["type"], "ImportError");
 
+    for _ in 0..3 {
+        let output = broker
+            .invoke(
+                "python.eval",
+                json!({"script": r#"
+import yaml
+original = yaml.YAMLError
+assert not hasattr(original, 'marker')
+try:
+    original.marker = 'leak'
+except TypeError:
+    pass
+else:
+    raise AssertionError('mutable class')
+class Malicious(original):
+    def __new__(cls, *args):
+        raise AssertionError('guest constructor')
+    def __init__(self, *args):
+        raise AssertionError('guest initializer')
+for replacement in [original, int, 42, Malicious, None]:
+    if replacement is None:
+        del yaml.YAMLError
+    else:
+        yaml.YAMLError = replacement
+    try:
+        yaml.safe_load('[')
+    except original as error:
+        assert type(error) is original
+    else:
+        raise AssertionError('missing error')
+result = True
+"#}),
+            )
+            .await?;
+        assert_eq!(output["result"], true, "{output}");
+    }
+
     // The host decoded the rebuilt manifest: one capability, the `python` word, and no retired
     // `idempotency` field for the SDK's compatibility decoder to swallow.
     let manifests: Vec<_> = broker.registry().manifests().collect();

@@ -1,7 +1,7 @@
 use std::fmt::{self, Write};
 
 use rustpython_vm::{
-    PyObjectRef, PyResult, TryFromObject, VirtualMachine,
+    PyObjectRef, PyResult, VirtualMachine,
     builtins::{PyBaseExceptionRef, PyTypeRef, PyUtf8StrRef},
 };
 use serde_json::{Map, Number, Value};
@@ -21,11 +21,12 @@ pub(crate) mod yaml_module {
     use super::*;
 
     #[pyattr(name = "YAMLError", once)]
-    fn error(vm: &VirtualMachine) -> PyTypeRef {
-        vm.ctx.new_exception_type(
+    pub(super) fn error(vm: &VirtualMachine) -> PyTypeRef {
+        crate::exception::immutable_exception_type(
+            vm,
             "yaml",
             "YAMLError",
-            Some(vec![vm.ctx.exceptions.value_error.to_owned()]),
+            vm.ctx.exceptions.value_error.to_owned(),
         )
     }
 
@@ -45,16 +46,7 @@ pub(crate) mod yaml_module {
 }
 
 fn exception(vm: &VirtualMachine, message: String) -> PyBaseExceptionRef {
-    let error_type = vm
-        .sys_module
-        .get_attr("modules", vm)
-        .and_then(|modules| modules.get_item("yaml", vm))
-        .and_then(|module| module.get_attr("YAMLError", vm))
-        .and_then(|class| PyTypeRef::try_from_object(vm, class));
-    match error_type {
-        Ok(error_type) => vm.new_exception_msg(error_type, message.into()),
-        Err(_error) => vm.new_value_error(message),
-    }
+    vm.new_exception_msg(yaml_module::error(vm), message.into())
 }
 
 pub(crate) fn load_yaml(source: &str) -> Result<Value, String> {
@@ -334,6 +326,54 @@ mod tests {
 
     use super::{dump_yaml, load_yaml};
     use crate::limits::{MAX_DEPTH, MAX_SAFE_INTEGER, YAML_BYTES};
+
+    #[test]
+    fn yaml_exception_class_is_native_and_immutable_across_interpreters() {
+        std::thread::Builder::new()
+            .stack_size(32 * 1024 * 1024)
+            .spawn(|| {
+                for _ in 0..3 {
+                    crate::eval::interpreter().enter(|vm| {
+                        vm.run_code_string(
+                            vm.new_scope_with_builtins(),
+                            r#"
+import yaml
+original = yaml.YAMLError
+try:
+    original.marker = 'leak'
+except TypeError:
+    pass
+else:
+    raise AssertionError('mutable native class')
+assert not hasattr(original, 'marker')
+class Malicious(original):
+    def __new__(cls, *args):
+        raise AssertionError('guest constructor')
+    def __init__(self, *args):
+        raise AssertionError('guest initializer')
+for replacement in [original, int, 42, Malicious, None]:
+    if replacement is None:
+        del yaml.YAMLError
+    else:
+        yaml.YAMLError = replacement
+    try:
+        yaml.safe_load('[')
+    except original as error:
+        assert type(error) is original
+    else:
+        raise AssertionError('missing error')
+result = True
+"#,
+                            "<yaml-exception-regression>".to_owned(),
+                        )
+                        .unwrap();
+                    });
+                }
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
 
     #[test]
     fn loads_the_constrained_value_model_and_preserves_timestamp_text() {
