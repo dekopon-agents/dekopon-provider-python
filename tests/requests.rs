@@ -44,6 +44,9 @@ impl Server {
                     }
                     Err(error) => panic!("accept: {error}"),
                 };
+                // macOS may inherit O_NONBLOCK from the listener. A partial request must not
+                // silently become a different fixture route when read reports WouldBlock.
+                stream.set_nonblocking(false).unwrap();
                 stream
                     .set_read_timeout(Some(Duration::from_secs(2)))
                     .unwrap();
@@ -53,11 +56,12 @@ impl Server {
                 let mut request = Vec::new();
                 let mut byte = [0];
                 while !request.ends_with(b"\r\n\r\n") && request.len() < 16384 {
-                    if stream.read(&mut byte).unwrap_or(0) == 0 {
+                    if stream.read(&mut byte).expect("read fixture request") == 0 {
                         break;
                     }
                     request.push(byte[0]);
                 }
+                assert!(request.ends_with(b"\r\n\r\n"), "incomplete fixture request");
                 let request = String::from_utf8(request).unwrap();
                 let line = request.lines().next().unwrap_or("").to_owned();
                 recorded.lock().unwrap().push(line.clone());
