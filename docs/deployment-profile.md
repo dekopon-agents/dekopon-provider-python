@@ -49,10 +49,9 @@ and this release needs the same 151-page memory minimum on both platforms.
 | 50,000,000 fuel | `OutOfFuel` during startup |
 | 1,000,000,000 fuel | normal `result = 2` success |
 
-`./scripts/measure-final-artifact.sh python-provider.wasm` writes the machine-readable record to
-`/tmp/dekopon-python-measurements.json` and captures raw core declarations; CI uploads that record
-with its ignored review artifact. The fuel bracket in the table is asserted against the real broker
-host by `tests/broker.rs`, not by the measurement script.
+The measured artifact table above is a manually recorded snapshot, not a generated file; there is
+no local measurement script anymore. The fuel bracket in the table is asserted against the real
+broker host by `tests/broker.rs`.
 
 ## Admission and process memory
 

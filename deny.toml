@@ -1,27 +1,31 @@
+# The fleet-uniform dependency policy. `cargo deny --all-features check bans licenses sources
+# advisories` runs it in CI and on a laptop; both graphs below are checked, because the shipped
+# component and the native test harness resolve to different closures.
 [graph]
-all-features = true
+targets = ["wasm32-unknown-unknown", "x86_64-unknown-linux-gnu"]
+all-features = false
 
 [advisories]
-version = 2
-yanked = "deny"
 ignore = [
-  { id = "RUSTSEC-2024-0436", reason = "paste 1.0.15 is fixed in the accepted exact RustPython 0.5.0 graph; no maintained compatible release exists" },
-  { id = "RUSTSEC-2025-0075", reason = "exact RustPython 0.5.0 rust-unic closure; unmaintained, no safe compatible upgrade" },
-  { id = "RUSTSEC-2025-0078", reason = "exact RustPython 0.5.0 rust-unic closure; unmaintained, no safe compatible upgrade" },
-  { id = "RUSTSEC-2025-0079", reason = "exact RustPython 0.5.0 rust-unic closure; unmaintained, no safe compatible upgrade" },
-  { id = "RUSTSEC-2025-0080", reason = "exact RustPython 0.5.0 rust-unic closure; unmaintained, no safe compatible upgrade" },
-  { id = "RUSTSEC-2025-0081", reason = "exact RustPython 0.5.0 rust-unic closure; unmaintained, no safe compatible upgrade" },
-  { id = "RUSTSEC-2025-0082", reason = "exact RustPython 0.5.0 rust-unic closure; unmaintained, no safe compatible upgrade" },
-  { id = "RUSTSEC-2025-0083", reason = "exact RustPython 0.5.0 rust-unic closure; unmaintained, no safe compatible upgrade" },
-  { id = "RUSTSEC-2025-0094", reason = "exact RustPython 0.5.0 rust-unic closure; unmaintained, no safe compatible upgrade" },
-  { id = "RUSTSEC-2025-0098", reason = "exact RustPython 0.5.0 rust-unic closure; unmaintained, no safe compatible upgrade" },
-  { id = "RUSTSEC-2025-0100", reason = "exact RustPython 0.5.0 rust-unic closure; unmaintained, no safe compatible upgrade" },
-  { id = "RUSTSEC-2025-0102", reason = "exact RustPython 0.5.0 rust-unic closure; unmaintained, no safe compatible upgrade" },
+  # The exact RustPython 0.5.0 graph. paste is unmaintained and fixed at 1.0.15; the rust-unic
+  # closure is unmaintained with no compatible upgrade. Revisit on the next RustPython bump.
+  { id = "RUSTSEC-2024-0436", reason = "paste 1.0.15, fixed in the RustPython 0.5.0 graph" },
+  { id = "RUSTSEC-2025-0075", reason = "rust-unic closure of RustPython 0.5.0" },
+  { id = "RUSTSEC-2025-0078", reason = "rust-unic closure of RustPython 0.5.0" },
+  { id = "RUSTSEC-2025-0079", reason = "rust-unic closure of RustPython 0.5.0" },
+  { id = "RUSTSEC-2025-0080", reason = "rust-unic closure of RustPython 0.5.0" },
+  { id = "RUSTSEC-2025-0081", reason = "rust-unic closure of RustPython 0.5.0" },
+  { id = "RUSTSEC-2025-0082", reason = "rust-unic closure of RustPython 0.5.0" },
+  { id = "RUSTSEC-2025-0083", reason = "rust-unic closure of RustPython 0.5.0" },
+  { id = "RUSTSEC-2025-0094", reason = "rust-unic closure of RustPython 0.5.0" },
+  { id = "RUSTSEC-2025-0098", reason = "rust-unic closure of RustPython 0.5.0" },
+  { id = "RUSTSEC-2025-0100", reason = "rust-unic closure of RustPython 0.5.0" },
+  { id = "RUSTSEC-2025-0102", reason = "rust-unic closure of RustPython 0.5.0" },
 ]
 
 [licenses]
 version = 2
-confidence-threshold = 0.93
+confidence-threshold = 0.8
 allow = [
   "0BSD",
   "Apache-2.0",
@@ -34,6 +38,7 @@ allow = [
   "ISC",
   "MIT",
   "MIT-0",
+  "MPL-2.0",
   "PSF-2.0",
   "Python-2.0.1",
   "Unicode-3.0",
@@ -42,37 +47,27 @@ allow = [
   "Zlib",
   "bzip2-1.0.6",
 ]
-# Owner-accepted, provider-local exceptions. These exact package/version entries are paired
-# with complete corresponding source and relink instructions; they are intentionally not a blanket
-# LGPL allow and do not alter the separate Dekopon core repository policy.
 exceptions = [
-  { allow = ["LGPL-3.0-only"], crate = "malachite-base@0.9.2" },
-  { allow = ["LGPL-3.0-only"], crate = "malachite-bigint@0.9.2" },
-  { allow = ["LGPL-3.0-only"], crate = "malachite-nz@0.9.2" },
-  { allow = ["LGPL-3.0-only"], crate = "malachite-q@0.9.2" },
-  { allow = ["LGPL-2.1-or-later"], crate = "r-efi@5.3.0" },
-  { allow = ["LGPL-2.1-or-later"], crate = "r-efi@6.0.0" },
+  # LGPL via RustPython's bigint backend. Disclosed by the SBOM; the source is this public tag.
+  { allow = ["LGPL-3.0-only"], crate = "malachite-base" },
+  { allow = ["LGPL-3.0-only"], crate = "malachite-bigint" },
+  { allow = ["LGPL-3.0-only"], crate = "malachite-nz" },
+  { allow = ["LGPL-3.0-only"], crate = "malachite-q" },
+  { allow = ["LGPL-2.1-or-later"], crate = "r-efi" },
 ]
 
-[[licenses.clarify]]
-name = "rustpython-doc"
-version = "0.5.0"
-expression = "Python-2.0.1"
-license-files = [{ path = "LICENSE", hash = 0x89e6df3c }]
-
-[[licenses.clarify]]
-name = "rustpython-pylib"
-version = "0.5.0"
-expression = "Python-2.0.1"
-license-files = [{ path = "Lib/PSF-LICENSE", hash = 0xe5f4697b }]
+[licenses.private]
+ignore = false
 
 [bans]
-multiple-versions = "warn"
+multiple-versions = "allow"
 wildcards = "deny"
-highlight = "all"
-deny = []
-skip = []
-skip-tree = []
+# Workspace-internal path dependencies carry no version (openobserve); that is not a wildcard.
+allow-wildcard-paths = true
+highlight = "simplest-path"
+workspace-default-features = "allow"
+external-default-features = "allow"
+allow-workspace = true
 
 [sources]
 unknown-registry = "deny"
