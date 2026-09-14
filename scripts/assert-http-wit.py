@@ -6,8 +6,13 @@ import sys
 actual, expected = [json.load(open(path, encoding="utf-8")) for path in sys.argv[1:]]
 assert len(actual["worlds"]) == 1
 world = actual["worlds"][0]
-assert list(world["imports"]) == ["dekopon:http/client@1.0.0"], world["imports"]
-assert world["imports"]["dekopon:http/client@1.0.0"] == {"interface": {"id": 0}}
+assert world["name"] == "root"
+assert world["imports"] == {"interface-0": {"interface": {"id": 0}}}, world["imports"]
+assert actual["packages"] == [
+    {"name": "dekopon:http@1.0.0", "interfaces": {"client": 0}, "worlds": {}},
+    {"name": "root:component", "interfaces": {}, "worlds": {"root": 0}},
+]
+assert actual["interfaces"][0]["package"] == 0
 assert sorted(world["exports"]) == ["describe", "invoke", "run-command"]
 assert len(actual["interfaces"]) == 1
 
