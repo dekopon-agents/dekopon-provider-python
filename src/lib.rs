@@ -1,7 +1,8 @@
 //! A single constrained RustPython capability for Dekopon, and the `python` command word for it.
 //!
-//! The default component has no imports; feature `http` adds only broker-mediated HTTP. Every invocation creates a fresh VM, captures bounded stdout in
-//! Rust, and projects only an explicitly bounded JSON value model. Resource termination remains a
+//! The default-on `http` feature imports only broker-mediated HTTP. Every invocation creates a
+//! fresh VM, captures bounded stdout in Rust, and projects only an explicitly bounded JSON value
+//! model. Resource termination remains a
 //! host responsibility: provider code cannot catch Wasmtime fuel, deadline, or memory traps.
 //!
 //! `run-command` is pure argv parsing in `commands`: it renders help and usage errors or proposes
