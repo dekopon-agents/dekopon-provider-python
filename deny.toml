@@ -6,7 +6,22 @@ targets = ["wasm32-unknown-unknown", "x86_64-unknown-linux-gnu"]
 all-features = false
 
 [advisories]
-ignore = []
+ignore = [
+  # The exact RustPython 0.5.0 graph. paste is unmaintained and fixed at 1.0.15; the rust-unic
+  # closure is unmaintained with no compatible upgrade. Revisit on the next RustPython bump.
+  { id = "RUSTSEC-2024-0436", reason = "paste 1.0.15, fixed in the RustPython 0.5.0 graph" },
+  { id = "RUSTSEC-2025-0075", reason = "rust-unic closure of RustPython 0.5.0" },
+  { id = "RUSTSEC-2025-0078", reason = "rust-unic closure of RustPython 0.5.0" },
+  { id = "RUSTSEC-2025-0079", reason = "rust-unic closure of RustPython 0.5.0" },
+  { id = "RUSTSEC-2025-0080", reason = "rust-unic closure of RustPython 0.5.0" },
+  { id = "RUSTSEC-2025-0081", reason = "rust-unic closure of RustPython 0.5.0" },
+  { id = "RUSTSEC-2025-0082", reason = "rust-unic closure of RustPython 0.5.0" },
+  { id = "RUSTSEC-2025-0083", reason = "rust-unic closure of RustPython 0.5.0" },
+  { id = "RUSTSEC-2025-0094", reason = "rust-unic closure of RustPython 0.5.0" },
+  { id = "RUSTSEC-2025-0098", reason = "rust-unic closure of RustPython 0.5.0" },
+  { id = "RUSTSEC-2025-0100", reason = "rust-unic closure of RustPython 0.5.0" },
+  { id = "RUSTSEC-2025-0102", reason = "rust-unic closure of RustPython 0.5.0" },
+]
 
 [licenses]
 version = 2
@@ -16,6 +31,7 @@ allow = [
   "Apache-2.0",
   "Apache-2.0 WITH LLVM-exception",
   "BSD-2-Clause",
+  "BSD-2-Clause-Views",
   "BSD-3-Clause",
   "BSL-1.0",
   "CC0-1.0",
@@ -23,12 +39,16 @@ allow = [
   "MIT",
   "MIT-0",
   "MPL-2.0",
+  "PSF-2.0",
+  "Python-2.0.1",
   "Unicode-3.0",
   "Unicode-DFS-2016",
   "Unlicense",
   "Zlib",
+  "bzip2-1.0.6",
 ]
 exceptions = [
+  # LGPL via RustPython's bigint backend. Disclosed by the SBOM; the source is this public tag.
   { allow = ["LGPL-3.0-only"], crate = "malachite-base" },
   { allow = ["LGPL-3.0-only"], crate = "malachite-bigint" },
   { allow = ["LGPL-3.0-only"], crate = "malachite-nz" },
@@ -38,18 +58,6 @@ exceptions = [
 
 [licenses.private]
 ignore = false
-
-[[licenses.clarify]]
-name = "rustpython-doc"
-version = "0.5.0"
-expression = "Python-2.0.1"
-license-files = [{ path = "LICENSE", hash = 0x89e6df3c }]
-
-[[licenses.clarify]]
-name = "rustpython-pylib"
-version = "0.5.0"
-expression = "Python-2.0.1"
-license-files = [{ path = "Lib/PSF-LICENSE", hash = 0xe5f4697b }]
 
 [bans]
 multiple-versions = "allow"
