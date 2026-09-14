@@ -1,4 +1,4 @@
-/// Deterministic, non-cryptographic getrandom backend for RustPython internals on the import-free
+/// Deterministic, non-cryptographic getrandom backend for RustPython internals on the constrained
 /// Wasm target. No Python entropy API is exposed. The VM hash seed is configured separately and
 /// explicitly; this symbol exists only because transitive internals require the upstream ABI.
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]

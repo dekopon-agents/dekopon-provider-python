@@ -16,7 +16,7 @@ corresponding-source / relinkability design for the standalone optional
 | `r-efi` | 6.0.0 | LGPL-2.1-or-later | `f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf` |
 
 The four Malachite crates are embedded in the static Wasm graph. The `r-efi` crates are
-cross-platform lock/source packages and do not reach the import-free Wasm target. This acceptance
+cross-platform lock/source packages and do not reach the WASI-free Wasm target. This acceptance
 is a project license-policy choice; no attorney review is claimed. It is local to this provider and
 does not change the permissive-only policy of the Dekopon core repository. Original source authored
 here remains MIT OR Apache-2.0; the distributed combined Wasm also contains LGPL-covered code.
@@ -47,7 +47,7 @@ unpacks the archive in a new temporary directory, validates the complete vendore
 a harmless change to `malachite-base 0.9.2`, refreshes Cargo's vendored file checksum, rebuilds
 from an empty canonical target with offline source replacement, componentizes with
 `wasm-tools 1.259.0`, and
-proves a valid import-free component results. `RELINKING.md` gives recipients the same commands and
+proves a valid HTTP-only component results. `RELINKING.md` gives recipients the same commands and
 installation information without a proprietary tool or key.
 
 ## Immutable release asset set
@@ -71,7 +71,7 @@ Each GitHub Release deliberately contains exactly these 14 assets:
 
 `SHA256SUMS` covers every other asset; the component and source archive also have dedicated checksum
 files. The release workflow re-downloads every draft asset by asset ID and verifies names, bytes,
-checksums, source contents, licenses, SBOM, and the import-free component before publication.
+checksums, source contents, licenses, SBOM, and the exact HTTP-only component before publication.
 
 ## OCI layout and links
 
@@ -136,13 +136,12 @@ without destructive rollback.
 Do not tag, push, package, or release until the owner chooses to perform the remaining mechanical
 publication steps. Every annotated `v<version>` tag must be contained in `main`.
 
-## Source-only HTTP feature coverage
+## Full HTTP component coverage
 
-The optional `http` feature is not added to the official binary/OCI asset set. It is a recipient
-source-build alternative (`python-http-provider.wasm`, `python.eval-http`) whose combined binary has
-the same LGPL corresponding-source obligations. The complete vendor closure includes the published
-`dekopon-provider-http` guest binding; the SBOM is generated with all features. CI independently
-reproduces the HTTP component and relinks modified Malachite for both feature selections offline.
-The HTTP gates require the exact byte-pinned HTTP WIT and sole raw guest import, plus validated
-component external imports/exports; the default build's strict zero-import assertions are unchanged.
-No dual-binary official release or additional OCI package is authorized by this feature.
+Default-on feature `http` is included in the one official `python-provider.wasm` binary/OCI asset,
+with capability `python.eval` and command word `python`. The complete vendor closure includes the
+published `dekopon-provider-http` guest binding; the SBOM includes all features. CI independently
+reproduces this component and relinks modified Malachite with network-disconnected source
+replacement. The single component-contract gate checks the byte-pinned WIT, sole raw guest HTTP
+import, and complete external import/export shape, rejecting WASI and extra imports.
+No alternate artifact or OCI package is shipped.

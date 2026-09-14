@@ -66,19 +66,7 @@ grep -Fq 'Compiling malachite-base v0.9.2' "$build_log" || {
   exit 1
 }
 wasm-tools validate "$source_root/python-provider.wasm"
-"$source_root/scripts/assert-zero-core-imports.sh" "$source_root/python-provider.wasm"
+"$source_root/scripts/assert-component-contract.sh" "$source_root/python-provider.wasm"
 (cd "$source_root" && sha256sum_check python-provider.wasm.sha256)
 printf 'offline relink succeeded after modifying %s; component SHA-256 %s\n' \
   "$modified" "$(sha256sum_digest "$source_root/python-provider.wasm")"
-
-# The source-only HTTP alternative has the same corresponding-source obligation.
-(
-  cd "$source_root"
-  DEKOPON_PYTHON_CANONICAL_ROOT="$temporary/canonical" \
-    ./scripts/build-component.sh "$source_root/python-http-provider.wasm" http
-) >>"$build_log" 2>&1 || { cat "$build_log" >&2; exit 1; }
-if grep -E 'Updating crates.io|Downloading crates|Downloaded ' "$build_log"; then
-  echo 'error: HTTP offline relink accessed a registry' >&2; exit 1
-fi
-"$source_root/scripts/assert-http-imports.sh" "$source_root/python-http-provider.wasm"
-(cd "$source_root" && sha256sum_check python-http-provider.wasm.sha256)

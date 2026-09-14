@@ -1,6 +1,6 @@
 # Dekopon Python provider
 
-By default, an import-free WebAssembly component exposing one read-only, High-risk capability:
+A WebAssembly component with broker-granted HTTP exposing one read-only, High-risk capability:
 `python.eval`. It embeds **RustPython 0.5.0 exactly**, creates a fresh interpreter per call,
 captures bounded stdout in Rust, and returns only a bounded JSON-shaped result. A Dekopon shell
 reaches it through the `python` command word. Version 0.4.0 targets `dekopon-provider-sdk` 0.15.0
@@ -13,27 +13,16 @@ load it.
 > the per-repository variable `PROVIDER_PYTHON_RELEASE_APPROVED=true`, an annotated tag, and every
 > transactional release check in `RELEASE_COMPLIANCE.md`.
 
-## Source-build-only HTTP alternative
+## Broker-granted HTTP
 
-**The optional HTTP variant is source-build-only, not an official release/OCI binary.** The
-existing release asset set remains the offline `python-provider.wasm`. Build the alternative with:
+The supported release/OCI component is **`python-provider.wasm`**, exposing **`python.eval`**
+and command word **`python`**. Cargo feature `http` is default-on and keeps Dekopon-specific
+HTTP code clearly separated; disabling defaults is a developer customization, not a supported
+CI or distribution variant. Ordinary Cargo builds include `dekopon_requests`.
+The sole external import is **`dekopon:http/client@1.0.0`**. A real broker must link it even for
+pure scripts, which succeed without HTTP grants. Bare empty-linker Wasmtime cannot instantiate it.
 
-```console
-./scripts/build-component.sh "$PWD/python-http-provider.wasm" http
-./scripts/assert-http-imports.sh python-http-provider.wasm
-./scripts/test-requests.sh python-http-provider.wasm
-./scripts/reproducible-build.sh http
-```
-
-This selects Cargo feature `http`, capability **`python.eval-http`**, and exactly one external
-import, **`dekopon:http/client@1.0.0`**. Default builds still expose `python.eval`, deny
-`dekopon_requests`, and have zero imports in every core. These are **alternative installations**:
-both identify as provider `python` and claim command word `python`; do not co-install them. The
-HTTP variant's command proposes `python.eval-http` using the same `{"script": ...}` input. Replace
-the selected component under your own digest-admission policy; do not label it an official release.
-A bare empty-linker Wasmtime invocation cannot instantiate this variant.
-
-Configure the broker's route/constraint set for `python.eval-http` with an explicit `http` grant:
+Configure the broker's route/constraint set for `python.eval` with an explicit `http` grant:
 `allowedHosts` (exact authorities, including effective nondefault port), `allowedMethods` (`GET`
 and/or `HEAD`), `maxRequests`, `maxRequestBytes`, and `maxResponseBytes`; keep
 `allowPlaintextLoopback: false` in production. Retain the fuel/memory/timeout/output profile below.
@@ -75,7 +64,8 @@ The native facade is intentionally not the pip `requests` package:
   OS exit status**. Stdout and result limits do not increase for HTTP.
 
 The source bundle, all-features SBOM, modified-Malachite offline relink test, feature-graph gate,
-and HTTP reproducibility/import checks cover this build too; official publication remains offline.
+and exact component-contract/reproducibility checks cover this one shipped HTTP component.
+Offline relinking means network-disconnected rebuilding from vendors, not a networkless runtime.
 `tests/requests.rs` uses FakeBroker for no-grant denial and its real registry with published
 `AuthorizationGate`/HTTP constraints for the controlled-server tests. It does not test Cedar policy
 selection; it tests production host enforcement of preauthorized grants without a transport mock.
@@ -90,7 +80,7 @@ artifacts are generated and ignored; they must never be committed.
 ./scripts/build-component.sh
 sha256sum --check python-provider.wasm.sha256
 wasm-tools validate python-provider.wasm
-./scripts/assert-zero-core-imports.sh python-provider.wasm
+./scripts/assert-component-contract.sh python-provider.wasm
 ```
 
 `python-provider.wasm` and its checksum are generated release products, not source files. CI
@@ -161,22 +151,16 @@ in — `python <<'EOF' … EOF` matches CPython's own read of a non-tty stdin wh
 
 ## Running it
 
-Outside a Dekopon shell there is no command-line host for this component. Two things can run it.
-
-The default offline component has zero imports, so Wasmtime executes it directly. This is the quickest check that a
-build works, and it is what `scripts/test-wasmtime-smoke.sh` does:
+Use a Dekopon broker that links the published HTTP interface. The real-host smoke, protocol,
+resource and HTTP-grant suites all exercise the same shipped component:
 
 ```console
-wasmtime run --invoke 'describe()' ./python-provider.wasm
-wasmtime run --invoke 'run-command(["-c", "result = 2"], none)' ./python-provider.wasm
-wasmtime run \
-  --invoke 'invoke("python.eval", "{\"script\":\"result = sum(i * i for i in range(5))\"}")' \
-  ./python-provider.wasm
+./scripts/test-broker-testkit.sh python-provider.wasm
+./scripts/test-requests.sh python-provider.wasm
 ```
 
-That applies none of the fuel, deadline, or memory limits the component depends on. For the real
-broker host with the selected profile, use `dekopon-provider-sdk-testkit`'s `FakeBroker`, as
-`tests/broker.rs` does throughout:
+`dekopon-provider-sdk-testkit`'s `FakeBroker` provides that host, including fuel, deadline,
+and memory limits. For example, a pure script needs no HTTP grant:
 
 ```rust
 let broker = FakeBroker::builder()
@@ -260,7 +244,8 @@ submodules such as `re._parser` and `json.decoder` are denied:
 - `json` — RustPython's frozen Python JSON module and native acceleration;
 - `re` — RustPython's Python regular-expression module / `_sre` implementation;
 - `yaml` — this provider's native constrained facade with exactly `safe_load(str)`,
-  `safe_dump(safe_value)`, and `YAMLError`.
+  `safe_dump(safe_value)`, and `YAMLError`;
+- `dekopon_requests` — bounded GET/HEAD under the invocation HTTP grant described above.
 
 Example:
 
@@ -284,8 +269,8 @@ stdlib/package compatibility, pip, or persistence.
 
 ## Denied authority and determinism
 
-The default offline component and every nested core have zero imports. There is no WASI, JS/browser, host
-environment, filesystem, network, HTTP/storage, clock, entropy, subprocess, dynamic loading, or
+The exact component contract allows only Dekopon HTTP. There is no WASI, JS/browser, host
+environment, filesystem, raw socket, storage, clock, entropy, subprocess, dynamic loading, or
 generic provider dispatch. Imports including `sys`, `os`, `time`, `random`, `secrets`, `socket`,
 `ssl`, `sqlite3`, `subprocess`, `threading`, `ctypes`, `tkinter`, and `webbrowser` are denied.
 `open`, `input`, and `breakpoint` are absent; guest `compile`, `eval`, and `exec` are denied.
@@ -330,7 +315,7 @@ published.
 
 ### Sticky host HTTP refusals
 
-In the HTTP variant, policy violations (including absent/wrong grants), malformed host requests,
+Policy violations (including absent/wrong grants), malformed host requests,
 and host byte/call-budget exhaustion mark the invocation rejected. Although `send` returns a typed
 error to Python, the real broker checks that sticky state after guest execution and returns
 `HostCallRejected` instead of a successful guest envelope, even if the script catches the exception.

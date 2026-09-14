@@ -1,15 +1,22 @@
 #!/usr/bin/env bash
-# Source-only HTTP variant: exact external authority, never a weakened offline assertion.
+# Exact shipped component contract: HTTP-only authority and full WIT shape.
 set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
-file=${1:?usage: assert-http-imports.sh <core-or-component.wasm>}
+# shellcheck source=lib-sha256.sh
+# shellcheck disable=SC1091
+source "$root/scripts/lib-sha256.sh"
+printf 'eac383801715cc62f41f7267de5c191827cfd2c45c766cda5600cfef2e1c03dd  %s\n' \
+  "$root/wit/provider.wit" | sha256sum_check - >/dev/null
+printf 'd0655d1ceba81fbd810f125cfc8fb2cbd8ad0696d91d34631b6b54f185dbc174  %s\n' \
+  "$root/wit/http/http.wit" | sha256sum_check - >/dev/null
+file=${1:?usage: assert-component-contract.sh <core-or-component.wasm>}
 temporary=$(mktemp -d)
 trap 'rm -rf "$temporary"' EXIT
 wasm-tools validate "$file"
 wasm-tools print --skeleton "$file" >"$temporary/skeleton"
 for forbidden in wasi_snapshot_preview1 'wasi:' __wbindgen_placeholder__ __wbindgen_externref_xform__ wasm-bindgen; do
   if LC_ALL=C grep -aF -- "$forbidden" "$file" >/dev/null; then
-    echo "error: HTTP variant contains forbidden marker $forbidden" >&2; exit 1
+    echo "error: component contains forbidden marker $forbidden" >&2; exit 1
   fi
 done
 if head -1 "$temporary/skeleton" | grep -q '^(module'; then
@@ -25,5 +32,5 @@ PY
 else
   wasm-tools component wit -j "$file" >"$temporary/actual.json"
   wasm-tools component wit -j "$root/wit/http/http.wit" >"$temporary/http.json"
-  python3 "$root/scripts/assert-http-wit.py" "$temporary/actual.json" "$temporary/http.json"
+  python3 "$root/scripts/assert-component-wit.py" "$temporary/actual.json" "$temporary/http.json"
 fi

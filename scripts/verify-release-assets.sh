@@ -43,8 +43,7 @@ actual_checksum_names=$(awk 'length($1) == 64 && $2 != "" {print $2}' "$director
 )
 
 if command -v wasm-tools >/dev/null 2>&1; then
-  wasm-tools validate "$directory/python-provider.wasm"
-  "$root/scripts/assert-zero-core-imports.sh" "$directory/python-provider.wasm"
+  "$root/scripts/assert-component-contract.sh" "$directory/python-provider.wasm"
 fi
 
 python3 - "$directory/$archive" "$top" <<'PY'
@@ -71,7 +70,7 @@ with tarfile.open(archive, "r:gz") as bundle:
         f"{top}/wit/provider.wit",
         f"{top}/wit/http/http.wit",
         f"{top}/src/requests.rs",
-        f"{top}/scripts/assert-http-imports.sh",
+        f"{top}/scripts/assert-component-contract.sh",
         f"{top}/vendor/dekopon-provider-http-0.15.0/.cargo-checksum.json",
         f"{top}/RELINKING.md",
         f"{top}/SOURCE_MANIFEST.json",

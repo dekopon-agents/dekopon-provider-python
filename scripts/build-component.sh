@@ -9,12 +9,8 @@ source "$root/scripts/lib-sha256.sh"
 # shellcheck source=lib-release-assets.sh
 # shellcheck disable=SC1091
 source "$root/scripts/lib-release-assets.sh"
-variant=${2:-offline}
-case "$variant" in
-  offline) artifact=python-provider; features=(--no-default-features); assertion=assert-zero-core-imports.sh ;;
-  http) artifact=python-http-provider; features=(--no-default-features --features http); assertion=assert-http-imports.sh ;;
-  *) echo "error: variant must be offline or http" >&2; exit 1 ;;
-esac
+[[ $# -le 1 ]] || { echo "usage: build-component.sh [component.wasm]" >&2; exit 1; }
+artifact=python-provider
 component=${1:-"$root/$artifact.wasm"}
 required_rust="1.98.1"
 required_rustc="rustc 1.98.1 (48a229cea 2026-09-01)"
@@ -45,7 +41,6 @@ if [[ ${DEKOPON_PYTHON_CANONICAL_INNER:-0} != 1 ]]; then
   fi
 
   canonical=${DEKOPON_PYTHON_CANONICAL_ROOT:-/tmp/dekopon-python-provider-canonical}
-  if [[ "$variant" == http ]]; then canonical="${canonical}-http"; fi
   lock="${canonical}.lock"
   if ! mkdir "$lock" 2>/dev/null; then
     echo "error: canonical provider build already active at $canonical" >&2
@@ -105,13 +100,12 @@ if [[ ${DEKOPON_PYTHON_CANONICAL_INNER:-0} != 1 ]]; then
   (
     cd "$canonical"
     DEKOPON_PYTHON_CANONICAL_INNER=1 \
-      ./scripts/build-component.sh "$canonical/$artifact.wasm" "$variant"
+      ./scripts/build-component.sh "$canonical/$artifact.wasm"
   )
 
   # Leave the exact sanitized release build available at the validation command's conventional
   # target path. Remove only this generated release subtree, never another worktree or shared cache.
   release_parent="$root/target/wasm32-unknown-unknown"
-  if [[ "$variant" == http ]]; then release_parent="$root/target/http-component/wasm32-unknown-unknown"; fi
   rm -rf "$release_parent/release"
   mkdir -p "$release_parent"
   cp -R "$canonical/target/wasm32-unknown-unknown/release" "$release_parent/release"
@@ -123,7 +117,7 @@ if [[ ${DEKOPON_PYTHON_CANONICAL_INNER:-0} != 1 ]]; then
     sha256sum_run "$(basename "$component")" >"$(basename "$component").sha256"
   )
   wasm-tools validate "$component"
-  "$root/scripts/$assertion" "$component"
+  "$root/scripts/assert-component-contract.sh" "$component"
   sha256sum_check "${component}.sha256"
 
   for forbidden in GH_TOKEN GITHUB_TOKEN GH_PAT OF_PASSWORD UNIFI_SSH_PASSWORD \
@@ -190,16 +184,15 @@ cargo=("$root/.canonical-bin/cargo" +"$required_rust")
   --manifest-path "$root/Cargo.toml" \
   --target wasm32-unknown-unknown \
   --release \
-  "${features[@]}" \
   -- \
   -C "metadata=dekopon-python-provider-$(release_package_version "$root")-repro-v1" \
   -C extra-filename=
 
 wasm-tools validate "$core"
-"$root/scripts/$assertion" "$core"
+"$root/scripts/assert-component-contract.sh" "$core"
 wasm-tools component new "$core" -o "$component"
 wasm-tools validate "$component"
-"$root/scripts/$assertion" "$component"
+"$root/scripts/assert-component-contract.sh" "$component"
 (
   cd "$(dirname "$component")"
   sha256sum_run "$(basename "$component")" >"$(basename "$component").sha256"

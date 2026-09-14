@@ -18,7 +18,6 @@ env:
   CARGO_CYCLONEDX_VERSION: "0.5.9"
   ACTIONLINT_VERSION: "1.7.12"
   ACTIONLINT_LINUX_AMD64_SHA256: "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
-  WASMTIME_VERSION: "48.0.2"
 
 jobs:
   source:
@@ -64,13 +63,12 @@ jobs:
           cargo +"$PROVIDER_RUST_TOOLCHAIN" fmt --all -- --check
           cargo +"$PROVIDER_RUST_TOOLCHAIN" clippy --locked --all-targets -- -D warnings
           cargo +"$PROVIDER_RUST_TOOLCHAIN" test --locked --all-targets
-          cargo +"$PROVIDER_RUST_TOOLCHAIN" clippy --locked --all-targets --features http -- -D warnings
-          cargo +"$PROVIDER_RUST_TOOLCHAIN" test --locked --lib --features http
           cargo +"$PROVIDER_RUST_TOOLCHAIN" check --locked --target wasm32-unknown-unknown
           ./scripts/assert-lock-and-feature-graph.sh Cargo.lock
           cargo deny check licenses advisories bans sources
           ./scripts/check-third-party-notices.sh Cargo.lock THIRD_PARTY_NOTICES.md
-          bash -n scripts/*.sh
+          for script in scripts/*.sh; do bash -n "$script"; done
+          python3 scripts/test-component-contract.py
           ruby -e 'require "yaml"; ARGV.each { |f| YAML.safe_load(File.read(f), aliases: true) }' \
             .github/workflows/*.yml
           "$RUNNER_TEMP/actionlint-bin" -color
@@ -101,10 +99,14 @@ jobs:
           set -euo pipefail
           version=$(cargo metadata --locked --no-deps --format-version 1 |
             jq -er '.packages[] | select(.name == "dekopon-python-provider") | .version')
+          df -h .
+          du -sh target 2>/dev/null || true
           ./scripts/build-component.sh
           ./scripts/prepare-release-assets.sh "$version" dist
           ./scripts/verify-release-assets.sh dist "$version"
           ./scripts/test-source-bundle-reproducibility.sh dist
+          df -h .
+          du -sh target
           ./scripts/test-source-bundle-relink.sh \
             "dist/dekopon-python-provider-$version-relink-source.tar.gz" \
             "dist/dekopon-python-provider-$version.cdx.json"
@@ -131,26 +133,19 @@ jobs:
           rustup target add wasm32-unknown-unknown --toolchain "$PROVIDER_RUST_TOOLCHAIN"
           cargo +"$PROVIDER_RUST_TOOLCHAIN" install wasm-tools \
             --version "$WASM_TOOLS_VERSION" --locked
-      - name: Install the independent Wasmtime oracle
-        shell: bash
-        run: |
-          set -euo pipefail
-          cargo +"$PROVIDER_RUST_TOOLCHAIN" install wasmtime-cli \
-            --version "$WASMTIME_VERSION" --locked
       - name: Build and inspect the component
         shell: bash
         run: |
           set -euo pipefail
+          df -h .
+          du -sh target 2>/dev/null || true
           ./scripts/build-component.sh
-          wasm-tools component wit -j python-provider.wasm >/tmp/python-provider-wit.json
-          ./scripts/assert-provider-wit.sh /tmp/python-provider-wit.json
-          ./scripts/assert-zero-core-imports.sh python-provider.wasm
-          ./scripts/test-wasmtime-smoke.sh python-provider.wasm
       - name: Run protocol, module, YAML, immediate-resource, and broker-host tests
         shell: bash
         run: |
           set -euo pipefail
           ./scripts/test-broker-testkit.sh python-provider.wasm
+          ./scripts/test-requests.sh python-provider.wasm
       - name: Measure exact final artifact
         shell: bash
         run: |
@@ -160,15 +155,6 @@ jobs:
           mkdir dist
           cp python-provider.wasm python-provider.wasm.sha256 \
             /tmp/dekopon-python-measurements.json dist/
-      - name: Source-only HTTP component, real grants, and independent reproducibility
-        shell: bash
-        run: |
-          set -euo pipefail
-          df -h .
-          du -sh target
-          ./scripts/build-component.sh "$PWD/python-http-provider.wasm" http
-          ./scripts/test-requests.sh python-http-provider.wasm
-          ./scripts/reproducible-build.sh http
       - name: Upload ignored review artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

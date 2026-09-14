@@ -114,7 +114,8 @@ for name in ("malachite-base", "malachite-bigint", "malachite-nz", "malachite-q"
         raise SystemExit(f"error: SBOM omits {name} 0.9.2")
 manifest = {
     "formatVersion": 1,
-    "buildVariants": ["offline", "http-source-only"],
+    "defaultFeatures": ["http"],
+    "component": "python-provider.wasm",
     "package": "dekopon-python-provider",
     "version": version,
     "gitRevision": revision,

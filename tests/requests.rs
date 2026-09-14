@@ -167,7 +167,7 @@ async fn invoke_full(
     );
     let proposal = ProposedInvocation::new(
         "requests-test".parse().unwrap(),
-        "python.eval-http".parse().unwrap(),
+        "python.eval".parse().unwrap(),
         Actor::Agent {
             agent: "requests-test".parse().unwrap(),
         },
@@ -211,10 +211,11 @@ fn rejected(error: BrokerInvocationFailure, expected: &str) {
 #[tokio::test(flavor = "multi_thread")]
 async fn requests_component_enforces_each_host_grant_and_bounds_the_facade()
 -> Result<(), Box<dyn std::error::Error>> {
-    let Some(component) = std::env::var_os("DEKOPON_PYTHON_HTTP_COMPONENT") else {
+    let Some(component) = std::env::var_os("DEKOPON_PYTHON_COMPONENT") else {
         return Ok(());
     };
-    let cache = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/http-compile-cache");
+    let cache =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/broker-testkit-compile-cache");
     std::fs::create_dir_all(&cache)?;
     let broker = FakeBroker::builder()
         .component(PathBuf::from(component))
@@ -229,8 +230,16 @@ async fn requests_component_enforces_each_host_grant_and_bounds_the_facade()
         .max_output_bytes(786_432)
         .build()
         .await?;
+    let pure = broker
+        .invoke(
+            "python.eval",
+            json!({"script": "import dekopon_requests\nprint('no grant needed')\nresult = 42"}),
+        )
+        .await?;
+    assert_eq!(pure["result"], 42);
+    assert_eq!(pure["stdout"], "no grant needed\n");
     let server = Server::start();
-    let no_grant = broker.invoke("python.eval-http", json!({"script": format!("import dekopon_requests as requests\nrequests.get('http://{}/index')", server.authority)})).await.expect_err("no HTTP grant");
+    let no_grant = broker.invoke("python.eval", json!({"script": format!("import dekopon_requests as requests\nrequests.get('http://{}/index')", server.authority)})).await.expect_err("no HTTP grant");
     assert!(
         format!("{no_grant:?}").contains("HostCallRejected"),
         "{no_grant}"

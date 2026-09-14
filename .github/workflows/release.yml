@@ -111,6 +111,8 @@ jobs:
           set -euo pipefail
           ./scripts/prepare-release-assets.sh "$VERSION" dist
           ./scripts/test-source-bundle-reproducibility.sh dist
+          df -h .
+          du -sh target
           ./scripts/test-source-bundle-relink.sh \
             "dist/dekopon-python-provider-$VERSION-relink-source.tar.gz" \
             "dist/dekopon-python-provider-$VERSION.cdx.json"

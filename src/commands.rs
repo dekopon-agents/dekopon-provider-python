@@ -23,34 +23,17 @@ use crate::{COMMAND_WORD, EVAL};
 const PIPED: &str = "-";
 
 /// What `--help` prints below the options: the contract a model needs before writing a script.
-#[cfg(not(feature = "http"))]
-const AFTER_HELP: &str = "\
-The script is Python 3 source, at most 65,536 UTF-8 bytes. Only json, re, and yaml
-(safe_load, safe_dump) import; there is no filesystem, network, clock, or input().
-print() output is captured. Assign the value to return to `result`: null, bool, number,
-string, list, or dict with string keys.
-
-Output is JSON:
-  {\"ok\":true,\"stdout\":\"...\",\"stdoutTruncated\":false,\"result\":...}
-  {\"ok\":false,\"stdout\":\"...\",\"stdoutTruncated\":false,\"error\":{\"kind\":\"runtime\",\"type\":\"ValueError\",\"message\":\"...\"}}
-Error kinds are syntax, runtime, yaml, and result.
-
-Examples:
-  python -c 'result = sum(i * i for i in range(5))'
-  python - <<'EOF' | jq .result
-  import yaml
-  result = yaml.safe_load(\"retries: 2\")
-  EOF";
-
 #[cfg(feature = "http")]
-const AFTER_HELP: &str =
-    "Source-build-only HTTP variant: proposes python.eval-http, not python.eval.
+const AFTER_HELP: &str = "Proposes python.eval. Pure scripts need no HTTP grant.
 Imports json, re, yaml, and dekopon_requests (GET/HEAD only).
 Every HTTP call is constrained by the host invocation grant; no credentials,
 redirects, retries, sockets, filesystem, clock, or input().
 Script: at most 65,536 UTF-8 bytes. print() is bounded to 65,536 bytes.
 Assign a safe JSON-shaped value to result. Runtime output is bounded JSON with
 ok/stdout/stdoutTruncated/result (or error), not an OS exit status.";
+
+#[cfg(not(feature = "http"))]
+const AFTER_HELP: &str = "Proposes python.eval. Imports json, re, and yaml; no host authority.";
 
 #[cfg(not(feature = "http"))]
 pub(crate) const ABOUT: &str =
@@ -161,11 +144,11 @@ mod tests {
 
     /// The help page, byte for byte. It is the only documentation a model reads before writing a
     /// script, so a change to it is a diff a reviewer sees.
-    #[cfg(not(feature = "http"))]
+    #[cfg(feature = "http")]
     #[test]
     fn help_is_pinned_byte_for_byte() {
         const HELP: &str = "\
-Run one Python 3 script in a fresh, import-free RustPython 0.5.0 VM
+Run one Python 3 script with broker-granted HTTP in a fresh RustPython 0.5.0 VM
 
 Usage: python -c <CODE>
        python - <<'EOF'
@@ -179,22 +162,13 @@ Options:
   -h, --help     Print help
   -V, --version  Print version
 
-The script is Python 3 source, at most 65,536 UTF-8 bytes. Only json, re, and yaml
-(safe_load, safe_dump) import; there is no filesystem, network, clock, or input().
-print() output is captured. Assign the value to return to `result`: null, bool, number,
-string, list, or dict with string keys.
-
-Output is JSON:
-  {\"ok\":true,\"stdout\":\"...\",\"stdoutTruncated\":false,\"result\":...}
-  {\"ok\":false,\"stdout\":\"...\",\"stdoutTruncated\":false,\"error\":{\"kind\":\"runtime\",\"type\":\"ValueError\",\"message\":\"...\"}}
-Error kinds are syntax, runtime, yaml, and result.
-
-Examples:
-  python -c 'result = sum(i * i for i in range(5))'
-  python - <<'EOF' | jq .result
-  import yaml
-  result = yaml.safe_load(\"retries: 2\")
-  EOF
+Proposes python.eval. Pure scripts need no HTTP grant.
+Imports json, re, yaml, and dekopon_requests (GET/HEAD only).
+Every HTTP call is constrained by the host invocation grant; no credentials,
+redirects, retries, sockets, filesystem, clock, or input().
+Script: at most 65,536 UTF-8 bytes. print() is bounded to 65,536 bytes.
+Assign a safe JSON-shaped value to result. Runtime output is bounded JSON with
+ok/stdout/stdoutTruncated/result (or error), not an OS exit status.
 ";
         for words in [&["--help"][..], &["-h"][..], &["-c", "x", "--help"][..]] {
             let (stdout, stderr, status) = rendered(words, None);

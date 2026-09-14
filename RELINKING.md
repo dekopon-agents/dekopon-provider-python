@@ -68,7 +68,7 @@ python3 scripts/refresh-vendored-checksum.py \
 
 ./scripts/build-component.sh
 wasm-tools validate python-provider.wasm
-./scripts/assert-zero-core-imports.sh python-provider.wasm
+./scripts/assert-component-contract.sh python-provider.wasm
 sha256sum --check --strict python-provider.wasm.sha256
 ```
 
@@ -79,28 +79,21 @@ source in the tree, point a `[patch.crates-io]` entry at that local path, and up
 with `cargo +1.98.1 update --offline`; all build inputs must remain local.
 
 `build-component.sh` compiles the modified graph at a scrubbed canonical path, invokes
-`wasm-tools component new`, validates the result, and proves that the resulting component and its
-nested core modules have no imports. A changed component normally has a different digest and is
+`wasm-tools component new`, validates the result, and enforces the exact HTTP-only external authority and full WIT contract. A changed component normally has a different digest and is
 not the official release artifact.
 
 ## Install a modified component
 
-No signing key, installation key, or proprietary linker is required. The component has no imports,
-so any Wasmtime 48.0.2 can exercise it directly before you authorize its new digest under your own
-deployment policy:
+No signing key, installation key, or proprietary linker is required. Authorize the modified
+component's new digest under your own deployment policy. It imports `dekopon:http/client@1.0.0`
+and requires a broker that links that interface, not bare empty-linker Wasmtime. Route `python.eval`
+and use command word `python`; configure narrow HTTP invocation grants as described in README.
+Pure scripts work without HTTP grants; attempted requests without grants are denied.
 
-```console
-wasmtime run --invoke 'describe()' ./python-provider.wasm
-wasmtime run \
-  --invoke 'invoke("python.eval", "{\"script\":\"result = 2\"}")' \
-  ./python-provider.wasm
-```
-
-That is a bare execution, not a broker: it applies none of the fuel, deadline, or memory limits the
-component depends on. To run it under the real host with those limits, use
-`dekopon-provider-sdk-testkit`'s `FakeBroker`, as `tests/broker.rs` does. The resource and security
-profile in `README.md` and `SECURITY.md` remains necessary. Do not label a modified build as an
-official Dekopon binary or expect its checksum to match a release.
+Use `scripts/test-broker-testkit.sh` and `scripts/test-requests.sh` to exercise the rebuilt
+`python-provider.wasm` with the real `dekopon-provider-sdk-testkit` host. The resource/security
+profile in README and SECURITY remains necessary. Do not label a modified build as an official
+Dekopon binary or expect its checksum to match a release.
 
 ## Permission and retention
 
@@ -110,20 +103,9 @@ Provider files authored by this project may be copied and modified under either 
 license files. The release archive and source OCI artifact are corresponding-source distribution
 materials and should be retained with any copy of the official Wasm.
 
-## Source-only HTTP alternative
+## Full component, offline build
 
-The same exact archive includes the optional `http` feature and its complete dependency closure.
-After modifying Malachite as above, build and verify this alternative offline:
-
-```console
-./scripts/build-component.sh "$PWD/python-http-provider.wasm" http
-./scripts/assert-http-imports.sh python-http-provider.wasm
-sha256sum --check --strict python-http-provider.wasm.sha256
-```
-
-CI performs both modified-source relinks. This variant has one external HTTP interface, not zero
-imports, and cannot run in an empty-linker Wasmtime. Install it instead of the offline component
-under your own digest policy (same provider ID `python` and command word), route `python.eval-http`,
-and configure narrow invocation HTTP grants as described in README. The HTTP artifact is
-source-build-only; the official release/OCI asset set remains the offline binary. The LGPL notice
-and retention obligations above apply equally to a distributed HTTP build.
+Cargo feature `http` is default-on. The archive includes its complete vendored dependency closure;
+the commands above rebuild the same full HTTP component as the official release. CI modifies
+Malachite and relinks this one artifact with offline source replacement. “Offline” describes
+network-disconnected rebuilding, not a networkless runtime or second supported artifact.

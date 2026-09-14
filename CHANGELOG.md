@@ -4,12 +4,10 @@
 
 ### Added
 
-- Source-build-only HTTP variant (`http`, `python.eval-http`) with native bounded
-  `dekopon_requests` GET/HEAD facade and real-host grant enforcement tests. Default offline
-  `python.eval` and the official release/OCI asset layout remain unchanged.
-
-## 0.4.0 - Unreleased
-
+- Ship one full HTTP `python-provider.wasm`: default-on `http` feature, `python.eval`, and
+  `python` command, with native bounded `dekopon_requests` GET/HEAD and real-host grants.
+  Consolidate exact import/WIT validation, release/reproduction and offline vendor relinking;
+  remove runtime variants and bare empty-linker smoke tests. Pure scripts need no HTTP grant.
 - Move to `dekopon-provider-sdk` 0.15.0 and `dekopon-provider-sdk-testkit` 0.15.0.
   `CommandInvocation` gains `secret_use`, always `None` here: this provider proposes no secret use.
 - Bare `python <<'EOF'` with something piped now proposes `python.eval` exactly like `python -`,

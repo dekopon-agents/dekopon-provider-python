@@ -11,13 +11,12 @@ test -z "$(git ls-files '*.wasm')"
 cargo +1.98.1 fmt --all -- --check
 cargo +1.98.1 clippy --locked --all-targets -- -D warnings
 cargo +1.98.1 test --locked --all-targets
-cargo +1.98.1 clippy --locked --all-targets --features http -- -D warnings
-cargo +1.98.1 test --locked --lib --features http
 cargo +1.98.1 check --locked --target wasm32-unknown-unknown
 ./scripts/assert-lock-and-feature-graph.sh Cargo.lock
 cargo deny check licenses advisories bans sources
 ./scripts/check-third-party-notices.sh Cargo.lock THIRD_PARTY_NOTICES.md
-bash -n scripts/*.sh
+for script in scripts/*.sh; do bash -n "$script"; done
+python3 scripts/test-component-contract.py
 python3 - <<'PY'
 import ast, pathlib
 for path in pathlib.Path("scripts").glob("*.py"):
@@ -29,16 +28,9 @@ if command -v actionlint >/dev/null 2>&1; then
   actionlint -color
 fi
 ./scripts/build-component.sh
-wasm-tools validate python-provider.wasm
-wasm-tools component wit -j python-provider.wasm >/tmp/python-provider-wit.json
-./scripts/assert-provider-wit.sh /tmp/python-provider-wit.json
-if command -v wasmtime >/dev/null 2>&1; then
-  ./scripts/test-wasmtime-smoke.sh python-provider.wasm
-fi
 ./scripts/test-broker-testkit.sh python-provider.wasm
 ./scripts/measure-final-artifact.sh python-provider.wasm
 sha256sum_check python-provider.wasm.sha256
 ./scripts/validate-workflows-and-release-layout.sh
 
-./scripts/build-component.sh "$root/python-http-provider.wasm" http
-./scripts/test-requests.sh python-http-provider.wasm
+./scripts/test-requests.sh python-provider.wasm

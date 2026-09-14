@@ -6,12 +6,9 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # Resolved from this script's absolute repository root.
 # shellcheck disable=SC1091
 source "$root/scripts/lib-sha256.sh"
-variant=${1:-offline}
-case "$variant" in
-  offline) artifact=python-provider; release_tree=target/wasm32-unknown-unknown/release ;;
-  http) artifact=python-http-provider; release_tree=target/http-component/wasm32-unknown-unknown/release ;;
-  *) echo "error: variant must be offline or http" >&2; exit 1 ;;
-esac
+[[ $# -eq 0 ]] || { echo "usage: reproducible-build.sh" >&2; exit 1; }
+artifact=python-provider
+release_tree=target/wasm32-unknown-unknown/release
 destination=/tmp/dekopon-python-repro
 diagnostics=$(mktemp -d "${TMPDIR:-/tmp}/dekopon-python-repro-inputs.XXXXXX")
 cleanup() {
@@ -39,11 +36,10 @@ cp "$root/$release_tree/dekopon_python_provider.wasm" \
 # Force an independent compile while retaining the ordinary per-source default target policy. The
 # canonical source path stays identical; only this inactive standalone snapshot target is removed.
 canonical=${DEKOPON_PYTHON_CANONICAL_ROOT:-/tmp/dekopon-python-provider-canonical}
-if [[ "$variant" == http ]]; then canonical="${canonical}-http"; fi
 rm -rf "$canonical/target"
 (
   cd "$destination"
-  ./scripts/build-component.sh "$destination/$artifact.wasm" "$variant"
+  ./scripts/build-component.sh "$destination/$artifact.wasm"
 )
 env_b=$(find \
   "$destination/$release_tree/build" \

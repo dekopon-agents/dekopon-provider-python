@@ -29,10 +29,7 @@ use serde_json::{Value, json};
 use crate::limits::SCRIPT_BYTES;
 
 /// The one capability, named once for the manifest, `invoke`, and the command word.
-#[cfg(not(feature = "http"))]
 pub(crate) const EVAL: &str = "python.eval";
-#[cfg(feature = "http")]
-pub(crate) const EVAL: &str = "python.eval-http";
 /// The command word this provider contributes to the sandboxed shell.
 pub(crate) const COMMAND_WORD: &str = "python";
 

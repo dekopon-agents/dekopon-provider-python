@@ -6,7 +6,7 @@ version = "0.4.0"
 edition = "2024"
 rust-version = "1.98.1"
 license = "MIT OR Apache-2.0"
-description = "A constrained, import-free RustPython evaluator for Dekopon"
+description = "A constrained RustPython evaluator with broker-granted HTTP for Dekopon"
 repository = "https://github.com/dekopon-agents/dekopon-provider-python"
 publish = false
 build = "build.rs"
@@ -15,7 +15,7 @@ build = "build.rs"
 crate-type = ["cdylib"]
 
 [features]
-default = []
+default = ["http"]
 http = ["dep:dekopon-provider-http"]
 
 [dependencies]

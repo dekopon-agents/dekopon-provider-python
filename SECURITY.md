@@ -11,9 +11,9 @@ Report suspected vulnerabilities privately through GitHub's security-advisory in
 `dekopon-agents/dekopon-provider-python`. Do not include secrets, production scripts, or private
 provider outputs in a public issue.
 
-## HTTP variant boundary (source-build-only)
+## Broker-granted HTTP boundary
 
-Cargo feature `http` replaces the default capability with `python.eval-http` and adds only the
+Default-on Cargo feature `http` keeps the Dekopon-specific code boundary and adds only the
 `dekopon:http/client@1.0.0` external import through published `dekopon-provider-http`. The native
 `dekopon_requests` module exposes GET/HEAD only. It implements no socket/transport, dispatcher,
 proposal engine, redirects, retry, cookie jar, ambient proxy, or credential API. Every call is
@@ -30,25 +30,26 @@ content stays bytes; text decodes UTF-8 with replacement. Stdout and complete ca
 retain their existing bounds. Data failures may follow successful network requests and do not imply
 rollback. Resource traps stay host errors. There are no runtime OS-exit semantics.
 
-The source-only HTTP artifact is an alternative to, not co-installable with, the official offline
-artifact: provider ID and command word collide. Its exact WIT and raw core import gates are separate
-from the unchanged zero-import gate. Componentizer adapter imports are internal to the validated
-component; its sole external authority is HTTP. Corresponding-source, SBOM, relink and reproducible
-build checks cover the feature; the official release/OCI layout remains offline-only.
+There is one supported release/OCI component, `python-provider.wasm`, one capability,
+`python.eval`, and command word `python`. `scripts/assert-component-contract.sh` validates the
+sole raw guest import and exact full external WIT, rejecting WASI and extra authority.
+Componentizer adapter imports are internal to the validated component. Corresponding-source,
+SBOM, network-disconnected vendor relinking and byte reproduction cover this HTTP component.
+Disabling default features is only a developer customization, not a distribution branch.
 
-## Default offline authority boundary
+## Authority boundary
 
 The security boundary is the validated component plus a correctly configured Dekopon host, not the
 Python import hook:
 
-- the component and every nested core module have zero imports;
-- there is no WASI adapter, JavaScript/browser binding, environment, filesystem, network, HTTP,
+- the component imports only `dekopon:http/client@1.0.0`, linked by the real broker;
+- there is no WASI adapter, JavaScript/browser binding, environment, filesystem, raw socket,
   storage, clock, entropy, subprocess, dynamic-library, or provider-dispatch import;
-- `allow_external_library` is false and the exact public import names are `json`, `re`, and `yaml`
-  only; private dependency modules are preloaded below the guest-visible import guard;
+- `allow_external_library` is false and the exact public import names are `json`, `re`, `yaml`, and
+  `dekopon_requests` only; private dependency modules are preloaded below the guest-visible import guard;
 - `open`, `input`, `breakpoint`, `compile`, `eval`, and `exec` are removed after trusted frozen
   modules are preloaded; no original privileged callable is retained on a Python-reachable object;
-- the Python-visible module registry is replaced with the three exact public modules, and denied
+- the Python-visible module registry is replaced with the four exact public modules, and denied
   transitive module references are removed from loaded module namespaces;
 - `sys`, `os`, `pathlib`, `time`, `random`, `secrets`, `socket`, `ssl`, `sqlite3`, `subprocess`,
   `threading`, `ctypes`, `tkinter`, and `webbrowser` are denied;
@@ -57,7 +58,7 @@ Python import hook:
   it constructs no VM and grants nothing.
 
 Python introspection is not a capability boundary. A script might find implementation objects or
-consume CPU/memory, but a zero-import store gives those objects no host authority. Admit only the
+consume CPU/memory, but host HTTP grants remain authoritative for every request. Pure scripts need no HTTP grant. Admit only the
 trusted release digest; compilation happens outside invocation fuel, linear-memory, and deadline
 limits.
 
@@ -109,27 +110,21 @@ new component. CI performs that modification and clean offline rebuild. The sour
 and component are generated release products and are never trusted merely because they exist in a
 working tree; release gates verify their bytes, manifests, and anonymous retrieval paths.
 
-## Host-enforced termination (both variants)
+## Host-enforced termination
 
 Provider code does **not** enforce instruction fuel, wall time, or linear memory and cannot turn a
 Wasmtime trap into a data envelope. Fuel exhaustion, epoch/Tokio deadline cancellation, memory
 allocation failure, and host input/output refusal remain host execution errors.
 
-Dekopon 0.11.1 immediate defaults are 67,108,864 bytes per memory, four memories, 100,000 table
-elements, 16 tables, 64 core instances, 1,048,576-byte input, 1,048,576-byte manifest/output,
-10,000,000 fuel, and 30 seconds. It serializes execution, creates a fresh store, uses an empty
-linker, and interrupts deadlines by epoch. Memory/input/output/fuel/timeout have CLI flags; table
-and instance ceilings do not.
-
-The exact final RustPython artifact consumes more than the immediate host's 10,000,000-fuel
-default during VM startup. That default therefore fails safely with `OutOfFuel` before user code.
-Use the documented dedicated profile (`--fuel 500000000`, `--timeout-ms 5000`) rather than treating
-the default as supported.
+An empty-linker immediate host cannot instantiate this component. Use the real broker with
+explicit HTTP linking and the dedicated profile in `docs/deployment-profile.md`: 64 MiB per
+memory, 1,000,000,000 fuel, 5,000 ms timeout, and 786,432-byte output limit. The 10,000,000
+and 50,000,000 fuel probes intentionally fail safely during VM startup in real-host tests.
 
 Broker defaults retain the same memory/table/count/input/output ceilings, provide 8,000,000,000
 fuel, and accept authorization timeouts no greater than 30 seconds. Every invocation gets a fresh
 store, async yields occur at most every `min(fuel, 10,000)` units, and Tokio applies the timeout.
-The broker linker implements only Dekopon HTTP/storage interfaces; the default offline component imports neither; the HTTP variant imports only HTTP.
+The broker linker implements Dekopon HTTP/storage interfaces; this component imports only HTTP.
 Use a 5,000 ms authorization timeout and 786,432-byte output authorization.
 
 A 64 MiB memory limit is per linear memory, not process RSS. With no `maxTotalMemoryBytes`, it is
@@ -142,12 +137,12 @@ measurements in `docs/deployment-profile.md`.
 Malformed capability input and unknown capabilities are stable SDK `ProviderError` failures.
 Python syntax, runtime, YAML, and result-conversion failures return bounded data with
 `ok: false`; tracebacks, locals, and stderr are omitted. Host fuel/deadline/memory/output failures
-trap outside that envelope. For the default offline build, none of these failures imply that network, filesystem, or another
-provider was contacted: it has no such imports. HTTP-enabled failures can follow completed requests.
+trap outside that envelope. Failures can follow completed HTTP requests; they do not imply rollback.
+Filesystem and generic provider calls remain unavailable.
 
 ### Sticky host HTTP refusals
 
-In the HTTP variant, policy violations (including absent/wrong grants), malformed host requests,
+Policy violations (including absent/wrong grants), malformed host requests,
 and host byte/call-budget exhaustion mark the invocation rejected. Although `send` returns a typed
 error to Python, the real broker checks that sticky state after guest execution and returns
 `HostCallRejected` instead of a successful guest envelope, even if the script catches the exception.
