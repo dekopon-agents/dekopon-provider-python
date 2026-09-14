@@ -17,7 +17,8 @@ source, lockfile, compiler, or componentizer change.
 | global timeout ceiling | 30,000 ms | broker `hostLimits` |
 | capability timeout | 5,000 ms | authorization constraint |
 | capability output | 786,432 bytes | authorization constraint |
-| HTTP / storage | none | component imports none |
+| HTTP | narrow invocation grant; absent denies requests | real broker HTTP linker |
+| storage | none | no storage import |
 
 The broker's default 2 MiB frame exceeds the required output-plus-64-KiB margin; the protocol hard
 maximum is 16 MiB. `hostLimits` is all-or-nothing global configuration. Per-capability policy may
@@ -29,29 +30,18 @@ intentionally asserted as safe failures and are not working profiles for RustPyt
 
 ## Measured artifact
 
-Measured on the v0.4.0 release run's `ubuntu-24.04` build, the release platform, with Rust 1.98.1
-and wasm-tools 1.259.0 (2026-09-13), on the 0.15.0 SDK; this is the exact artifact
-`ghcr.io/dekopon-agents/provider-python:0.4.0`'s `application/wasm` layer ships. The component
-bytes are reproducible per platform: every Linux checkout at this commit measures the same sizes
-and digest. A local macOS build of the same commit is 492 bytes larger (component 20,574,471
-bytes), with its own digest `7c32d685f20620691cb9716ec6bc4e1bad269ad29462641d37021b54c150c017`,
-and this release needs the same 151-page memory minimum on both platforms.
+The full HTTP component replaces the earlier v0.4.0 zero-import artifact. Do not reuse its
+size, digest, table declarations or memory minimum as measurements of this build. The exact-head
+CI review artifact contains the current size/digest record. Bytes are reproducible per platform,
+not promised identical across macOS and Linux.
 
-| Measurement | Result |
-|---|---:|
-| raw core | 20,574,031 bytes |
-| component | 20,573,979 bytes |
-| SHA-256 | `d6d0e15c8354e1fc4df5c410cfc0fa25ac11e6f06b972a822176adffca3ee9a5` |
-| component/core imports | 0 / 0 |
-| core memories | 1, minimum 151 pages (9,895,936 bytes), host-capped |
-| core tables | 1, fixed 6,091 funcrefs |
-| 10,000,000 fuel | `OutOfFuel` during startup |
-| 50,000,000 fuel | `OutOfFuel` during startup |
-| 1,000,000,000 fuel | normal `result = 2` success |
+The contract gate enforces one external interface (`dekopon:http/client@1.0.0`) and one raw core
+function import (`send`). `tests/broker.rs` asserts 10M/50M fuel failures and normal operation
+at 1G fuel and 64 MiB; `tests/requests.rs` exercises real multi-request grants on the same artifact.
+Pure scripts require no HTTP grant, but all invocations require HTTP linking by the broker.
 
-The measured artifact table above is a manually recorded snapshot, not a generated file; there is
-no local measurement script anymore. The fuel bracket in the table is asserted against the real
-broker host by `tests/broker.rs`.
+The shared CI log records the component size, imports and checksum; the uploaded component and
+checksum sidecar identify the exact build. The fuel bracket is asserted by `tests/broker.rs`.
 
 ## Admission and process memory
 
@@ -61,9 +51,7 @@ compiled code, Cranelift/component compilation, or host allocations. Compilation
 fuel and invocation deadlines.
 
 A single cold compiler process was measured at up to roughly 591 MB RSS on the v0.1.0 build, when
-a command-line host still existed to measure it under `/usr/bin/time`. The component has grown by
-about 270 KB (1.3%) since, mostly clap for the `python` command word, so that figure is an estimate
-for this build rather than a bound. Until platform-specific RSS and
+a command-line host still existed to measure it under `/usr/bin/time`. That historical figure is not a measurement or bound for the current HTTP component. Until platform-specific RSS and
 concurrency load tests establish a tighter number, budget at least
 **768 MiB plus admitted concurrent guest reservations** for one compiler/connection profile; do
 not derive a container limit from the 64 MiB store ceiling alone.

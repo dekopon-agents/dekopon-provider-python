@@ -1,6 +1,6 @@
 # Dekopon Python provider
 
-An import-free WebAssembly component exposing one read-only, High-risk capability:
+A WebAssembly component with broker-granted HTTP exposing one read-only, High-risk capability:
 `python.eval`. It embeds **RustPython 0.5.0 exactly**, creates a fresh interpreter per call,
 captures bounded stdout in Rust, and returns only a bounded JSON-shaped result. A Dekopon shell
 reaches it through the `python` command word. Version 0.4.0 targets `dekopon-provider-sdk` 0.15.0
@@ -13,6 +13,62 @@ load it.
 > [`dekopon-agents/provider-workflows`](https://github.com/dekopon-agents/provider-workflows), and
 > the CycloneDX SBOM the shared release workflow publishes. Publication runs through that shared
 > workflow: pushing an annotated `v*` tag is the only trigger.
+
+## Broker-granted HTTP
+
+The supported release/OCI component is **`python-provider.wasm`**, exposing **`python.eval`**
+and command word **`python`**. Cargo feature `http` is default-on and keeps Dekopon-specific
+HTTP code clearly separated; disabling defaults is a developer customization, not a supported
+CI or distribution variant. Ordinary Cargo builds include `dekopon_requests`.
+The sole external import is **`dekopon:http/client@1.0.0`**. A real broker must link it even for
+pure scripts, which succeed without HTTP grants. Bare empty-linker Wasmtime cannot instantiate it.
+
+Configure the broker's route/constraint set for `python.eval` with an explicit `http` grant:
+`allowedHosts` (exact authorities, including effective nondefault port), `allowedMethods` (`GET`
+and/or `HEAD`), `maxRequests`, `maxRequestBytes`, and `maxResponseBytes`; keep
+`allowPlaintextLoopback: false` in production. Retain the fuel/memory/timeout/output profile below.
+Do not attach credentials or secret-use bindings. The host enforces this **invocation grant on
+every request**, including destinations computed by the script; there is no new Cedar decision,
+nested proposal engine, or generic dispatch per call. Absent grants deny all calls. Host request
+budget exhaustion stays exhausted even when Python catches its exception. Host DNS/IP validation,
+HTTPS, byte/deadline limits, and redirect refusal remain authoritative. Plain HTTP is only available
+for explicitly granted loopback authorities with explicit ports and the opt-in flag (used by tests).
+
+```python
+import dekopon_requests as requests
+
+base = "https://example.test"
+index = requests.get(base + "/index")
+index.raise_for_status()
+total = 0
+for path in index.json():
+    child = requests.get(base + path)
+    child.raise_for_status()
+    total += child.json()["value"]
+print(total)
+result = total
+```
+
+The native facade is intentionally not the pip `requests` package:
+
+- Only `get(url)` and `head(url)`, with a UTF-8 string URL of at most 8,192 bytes; no optional
+  arguments, headers, body, credentials, cookies, sessions, proxies, retries, or redirect following.
+- `Response.status_code`, `ok` (status below 400), `content` (bytes), `text` (UTF-8 with replacement),
+  `json()` (strict JSON projected through the existing safe-value limits), and `raise_for_status()`
+  (raises at status 400 or above). HEAD content is empty. Redirect statuses are returned unchanged.
+- Buffered response bodies are additionally capped at 131,072 bytes; the host must bound the whole
+  response before it crosses the import. `json()` does not perform requests-style charset detection.
+- `RequestException` is the common base; `HTTPError` and `JSONDecodeError` derive from it. Host
+  failures expose only stable WIT codes such as `denied`, `host-call-limit`, or `response-too-large`,
+  never host diagnostic text or URLs. Provider-generated exceptions carry short bounded messages.
+- Runtime output is the existing JSON `ok/stdout/stdoutTruncated/result` or error envelope, **not an
+  OS exit status**. Stdout and result limits do not increase for HTTP.
+
+The shared workflow builds and reproduces this one shipped HTTP component and generates its SBOM.
+Provider-owned `tests/component_contract.rs` checks the exact HTTP-only authority and WIT shape.
+`tests/requests.rs` uses FakeBroker for no-grant denial and its real registry with published
+`AuthorizationGate`/HTTP constraints for the controlled-server tests. It does not test Cedar policy
+selection; it tests production host enforcement of preauthorized grants without a transport mock.
 
 ## Build
 
@@ -32,7 +88,7 @@ DEKOPON_PROVIDER_COMPONENT=$PWD/python-provider.wasm cargo test --locked --works
 
 `../provider-workflows/build.sh` is a sibling checkout of the shared workflows repository (see its
 own README for the exact clone step CI uses); it writes `python-provider.wasm` and its checksum,
-componentizes, and validates. Two RustPython 0.5.0 crates are vendored under `patches/` with one
+and componentizes it. The shared workflow validates it. Two RustPython 0.5.0 crates are vendored under `patches/` with one
 reproducibility fix each: `rustpython-derive-impl` sorts `py_freeze!` module traversal and every
 map/set-backed macro token emission instead of compiling randomly seeded collection order, and
 `rustpython-vm`'s build script no longer freezes every visible build variable (paths, and
@@ -81,23 +137,15 @@ in — `python <<'EOF' … EOF` matches CPython's own read of a non-tty stdin wh
 
 ## Running it
 
-Outside a Dekopon shell there is no command-line host for this component. Two things can run it.
-
-The component has zero imports, so Wasmtime executes it directly. This is the quickest check that a
-build works, and it is what the shared CI's raw wasmtime smoke step and
-`tests/broker.rs::raw_smoke_describe_and_eval_match_the_deleted_script` do:
+Use a Dekopon broker that links the published HTTP interface. The real-host smoke, protocol,
+resource and HTTP-grant suites all exercise the same shipped component:
 
 ```console
-wasmtime run --invoke 'describe()' ./python-provider.wasm
-wasmtime run --invoke 'run-command(["-c", "result = 2"], none)' ./python-provider.wasm
-wasmtime run \
-  --invoke 'invoke("python.eval", "{\"script\":\"result = sum(i * i for i in range(5))\"}")' \
-  ./python-provider.wasm
+DEKOPON_PROVIDER_COMPONENT=$PWD/python-provider.wasm cargo test --locked --test broker --test requests
 ```
 
-That applies none of the fuel, deadline, or memory limits the component depends on. For the real
-broker host with the selected profile, use `dekopon-provider-sdk-testkit`'s `FakeBroker`, as
-`tests/broker.rs` does throughout:
+`dekopon-provider-sdk-testkit`'s `FakeBroker` provides that host, including fuel, deadline,
+and memory limits. For example, a pure script needs no HTTP grant:
 
 ```rust
 let broker = FakeBroker::builder()
@@ -162,7 +210,7 @@ Script-level failure data is exactly:
 }
 ```
 
-Kinds are `syntax`, `runtime`, `yaml`, or `result`. No traceback, locals, or stderr are returned.
+Kinds are `syntax`, `runtime`, `yaml`, or `result`; HTTP facade exceptions use `runtime`. No traceback, locals, or stderr are returned.
 Unknown capability and malformed provider input instead use the SDK's stable provider-failure
 envelope. Host resource traps remain host errors.
 
@@ -181,7 +229,8 @@ submodules such as `re._parser` and `json.decoder` are denied:
 - `json` — RustPython's frozen Python JSON module and native acceleration;
 - `re` — RustPython's Python regular-expression module / `_sre` implementation;
 - `yaml` — this provider's native constrained facade with exactly `safe_load(str)`,
-  `safe_dump(safe_value)`, and `YAMLError`.
+  `safe_dump(safe_value)`, and `YAMLError`;
+- `dekopon_requests` — bounded GET/HEAD under the invocation HTTP grant described above.
 
 Example:
 
@@ -205,8 +254,8 @@ stdlib/package compatibility, pip, or persistence.
 
 ## Denied authority and determinism
 
-The final component and every nested core have zero imports. There is no WASI, JS/browser, host
-environment, filesystem, network, HTTP/storage, clock, entropy, subprocess, dynamic loading, or
+The exact component contract allows only Dekopon HTTP. There is no WASI, JS/browser, host
+environment, filesystem, raw socket, storage, clock, entropy, subprocess, dynamic loading, or
 generic provider dispatch. Imports including `sys`, `os`, `time`, `random`, `secrets`, `socket`,
 `ssl`, `sqlite3`, `subprocess`, `threading`, `ctypes`, `tkinter`, and `webbrowser` are denied.
 `open`, `input`, and `breakpoint` are absent; guest `compile`, `eval`, and `exec` are denied.
@@ -226,7 +275,8 @@ lookup, proposal submission, shell commands, persistence, or privileged imports.
 
 Formatting, clippy, `cargo deny`, the reproducible component build, and the test suite are all
 gated by the shared `ci / validate` workflow rather than local scripts; see [Build](#build) for
-the exact commands it runs.
+the local build and test commands. Component tests require `DEKOPON_PROVIDER_COMPONENT` and fail
+when it is unset; their contract fixtures also require `python3` and the pinned `wasm-tools`.
 
 ## License and corresponding source
 
@@ -240,3 +290,13 @@ and `LICENSE-GPL-3.0` (with `LICENSE-LGPL-2.1` for the locked `r-efi` source pac
 Corresponding source is the public tagged source tree itself, reproducibly rebuilt by the shared
 `ci / validate` and release workflows; the CycloneDX SBOM published with each release lists every
 embedded package. No `latest` tag is published.
+
+### Sticky host HTTP refusals
+
+Policy violations (including absent/wrong grants), malformed host requests,
+and host byte/call-budget exhaustion mark the invocation rejected. Although `send` returns a typed
+error to Python, the real broker checks that sticky state after guest execution and returns
+`HostCallRejected` instead of a successful guest envelope, even if the script catches the exception.
+Transport/protocol failures and provider-local JSON/status/body-limit errors do not replenish any
+budget but are ordinary bounded guest exceptions. A `maxResponseBytes` host refusal is a host error;
+the provider's smaller body cap is checked only after a host-accepted response.

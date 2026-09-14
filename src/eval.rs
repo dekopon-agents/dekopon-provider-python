@@ -68,7 +68,7 @@ pub(crate) fn evaluate(script: &str) -> Value {
     enforce_response_limit(value)
 }
 
-fn interpreter() -> Interpreter {
+pub(crate) fn interpreter() -> Interpreter {
     let mut settings = Settings::default();
     settings.isolated = true;
     settings.ignore_environment = true;
@@ -91,6 +91,8 @@ fn interpreter() -> Interpreter {
         crate::policy::policy_module::module_def(&builder.ctx),
         crate::yaml::yaml_module::module_def(&builder.ctx),
     ]);
+    #[cfg(feature = "http")]
+    definitions.push(crate::requests::requests_module::module_def(&builder.ctx));
     builder
         .add_native_modules(&definitions)
         .add_frozen_modules(rustpython_pylib::FROZEN_STDLIB)
@@ -203,6 +205,21 @@ mod tests {
             .expect("spawn RustPython test thread")
             .join()
             .expect("RustPython test thread")
+    }
+
+    #[test]
+    fn requests_import_matches_the_compiled_authority_contract() {
+        let output = evaluate(
+            "import dekopon_requests as requests\nresult = [hasattr(requests, 'get'), hasattr(requests, 'head'), hasattr(requests, 'post'), issubclass(requests.HTTPError, requests.RequestException)]",
+        );
+        #[cfg(feature = "http")]
+        assert_eq!(
+            output["result"],
+            json!([true, true, false, true]),
+            "{output}"
+        );
+        #[cfg(not(feature = "http"))]
+        assert_eq!(output["error"]["type"], "ImportError", "{output}");
     }
 
     #[test]

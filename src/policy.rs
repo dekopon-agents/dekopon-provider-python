@@ -1,6 +1,12 @@
 use rustpython_vm::{AsObject, PyResult, TryFromObject, VirtualMachine, builtins::PyDictRef};
 
-const ALLOWED_MODULES: [&str; 3] = ["json", "re", "yaml"];
+const ALLOWED_MODULES: &[&str] = &[
+    "json",
+    "re",
+    "yaml",
+    #[cfg(feature = "http")]
+    "dekopon_requests",
+];
 const REMOVED_BUILTINS: [&str; 6] = ["open", "input", "breakpoint", "compile", "eval", "exec"];
 const DENIED_MODULES: [&str; 15] = [
     "sys",

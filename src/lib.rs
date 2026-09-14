@@ -1,7 +1,8 @@
 //! A single constrained RustPython capability for Dekopon, and the `python` command word for it.
 //!
-//! The component has no imports. Every invocation creates a fresh VM, captures bounded stdout in
-//! Rust, and projects only an explicitly bounded JSON value model. Resource termination remains a
+//! The default-on `http` feature imports only broker-mediated HTTP. Every invocation creates a
+//! fresh VM, captures bounded stdout in Rust, and projects only an explicitly bounded JSON value
+//! model. Resource termination remains a
 //! host responsibility: provider code cannot catch Wasmtime fuel, deadline, or memory traps.
 //!
 //! `run-command` is pure argv parsing in `commands`: it renders help and usage errors or proposes
@@ -11,8 +12,11 @@ mod capture;
 mod commands;
 mod entropy;
 mod eval;
+mod exception;
 mod limits;
 mod policy;
+#[cfg(feature = "http")]
+mod requests;
 mod value;
 mod yaml;
 
@@ -51,13 +55,15 @@ impl Provider for PythonProvider {
         ProviderManifest {
             api_version: ProviderApiVersion::V1Alpha1,
             id: "python".parse().expect("static provider identifier"),
-            description: "Runs one bounded Python 3 script in a fresh import-free RustPython 0.5.0 VM"
-                .to_owned(),
+            description: crate::commands::ABOUT.to_owned(),
             command_words: vec![COMMAND_WORD.to_owned()],
             capabilities: vec![ProviderCapability {
                 id: EVAL.parse().expect("static capability identifier"),
-                description: "Evaluate a bounded Python 3 script with json, re, and constrained yaml; assign the safe JSON-shaped return value to result"
-                    .to_owned(),
+                description: if cfg!(feature = "http") {
+                    "Evaluate a bounded script with json, re, yaml and dekopon_requests GET/HEAD under the host HTTP invocation grant; assign output to result"
+                } else {
+                    "Evaluate a bounded Python 3 script with json, re, and constrained yaml; assign the safe JSON-shaped return value to result"
+                }.to_owned(),
                 effect: EffectKind::ReadOnly,
                 risk: RiskLevel::High,
                 input_schema: json!({
@@ -80,7 +86,7 @@ impl Provider for PythonProvider {
         if capability.as_str() != EVAL {
             return Err(ProviderError::new(
                 "unsupported-capability",
-                "the python provider exposes only python.eval",
+                format!("the python provider exposes only {EVAL}"),
             ));
         }
         let EvalInput { script } = serde_json::from_value(input).map_err(|_error| {

@@ -5,25 +5,51 @@
 Security fixes are accepted for the newest released minor line. The owner has accepted the exact
 LGPL-3.0-only Malachite packages and the corresponding-source/relinkability design for this
 standalone optional provider. That is a project policy decision, not a claim of attorney review. The
-repository variable and immutable release gates remain mechanical publication controls.
+shared release workflow gates remain mechanical publication controls.
 
 Report suspected vulnerabilities privately through GitHub's security-advisory interface for
 `dekopon-agents/dekopon-provider-python`. Do not include secrets, production scripts, or private
 provider outputs in a public issue.
+
+## Broker-granted HTTP boundary
+
+Default-on Cargo feature `http` keeps the Dekopon-specific code boundary and adds only the
+`dekopon:http/client@1.0.0` external import through published `dekopon-provider-http`. The native
+`dekopon_requests` module exposes GET/HEAD only. It implements no socket/transport, dispatcher,
+proposal engine, redirects, retry, cookie jar, ambient proxy, or credential API. Every call is
+checked against the host's existing invocation grant (not a new Cedar decision). The host enforces
+exact destination/method, DNS/IP policy, cumulative call budget, bounded request/response and timeout;
+catching an exception cannot replenish the host budget. No grant denies all requests. Do not bind
+credentials or secret-use authority to this capability. The provider cannot narrow a compromised
+host; admit the component digest and configure the host limits explicitly.
+
+URLs are capped at 8,192 UTF-8 bytes, response bodies at 131,072 bytes after the host's own
+pre-import byte bound, and JSON uses the existing safe-value limits. Host exception messages are
+reduced to stable error codes; HTTP status and JSON errors use short static diagnostics. Binary
+content stays bytes; text decodes UTF-8 with replacement. Stdout and complete capability output
+retain their existing bounds. Data failures may follow successful network requests and do not imply
+rollback. Resource traps stay host errors. There are no runtime OS-exit semantics.
+
+There is one supported release/OCI component, `python-provider.wasm`, one capability,
+`python.eval`, and command word `python`. `tests/component_contract.rs` validates the
+sole raw guest import and exact full external WIT, rejecting WASI and extra authority.
+Componentizer adapter imports are internal to the validated component. Corresponding-source,
+SBOM and shared byte reproduction cover this HTTP component.
+Disabling default features is only a developer customization, not a distribution branch.
 
 ## Authority boundary
 
 The security boundary is the validated component plus a correctly configured Dekopon host, not the
 Python import hook:
 
-- the component and every nested core module have zero imports;
-- there is no WASI adapter, JavaScript/browser binding, environment, filesystem, network, HTTP,
+- the component imports only `dekopon:http/client@1.0.0`, linked by the real broker;
+- there is no WASI adapter, JavaScript/browser binding, environment, filesystem, raw socket,
   storage, clock, entropy, subprocess, dynamic-library, or provider-dispatch import;
-- `allow_external_library` is false and the exact public import names are `json`, `re`, and `yaml`
-  only; private dependency modules are preloaded below the guest-visible import guard;
+- `allow_external_library` is false and the exact public import names are `json`, `re`, `yaml`, and
+  `dekopon_requests` only; private dependency modules are preloaded below the guest-visible import guard;
 - `open`, `input`, `breakpoint`, `compile`, `eval`, and `exec` are removed after trusted frozen
   modules are preloaded; no original privileged callable is retained on a Python-reachable object;
-- the Python-visible module registry is replaced with the three exact public modules, and denied
+- the Python-visible module registry is replaced with the four exact public modules, and denied
   transitive module references are removed from loaded module namespaces;
 - `sys`, `os`, `pathlib`, `time`, `random`, `secrets`, `socket`, `ssl`, `sqlite3`, `subprocess`,
   `threading`, `ctypes`, `tkinter`, and `webbrowser` are denied;
@@ -32,7 +58,7 @@ Python import hook:
   it constructs no VM and grants nothing.
 
 Python introspection is not a capability boundary. A script might find implementation objects or
-consume CPU/memory, but a zero-import store gives those objects no host authority. Admit only the
+consume CPU/memory, but host HTTP grants remain authoritative for every request. Pure scripts need no HTTP grant. Admit only the
 trusted release digest; compilation happens outside invocation fuel, linear-memory, and deadline
 limits.
 
@@ -68,21 +94,16 @@ The custom `getrandom 0.3.4` backend is deterministic and non-cryptographic. It 
 internals, while the VM uses an explicit fixed hash seed. No Python entropy surface is exposed.
 Host fuel and deadlines, rather than hash randomization, bound adversarial algorithms.
 
-RustPython 0.5.0's build script copies its complete build environment into frozen
-`_sysconfigdata`. The release builder therefore compiles a clean fixed-path source snapshot under
-an explicit non-secret environment and rejects sensitive key markers in the artifact. Its complete
-local `rustpython-derive-impl 0.5.0` patch also replaces randomized `py_freeze!` module ordering and
-map/set-backed macro token emission with ordered traversal; it does not remove or rewrite Python or
-Rust code or data. Running a plain release Cargo build is useful as a compile gate but is **not** an
-approved distributable build;
-only `scripts/build-component.sh` produces the scrubbed component.
+The vendored `rustpython-vm 0.5.0` build-script patch writes an empty `_sysconfigdata` table
+instead of freezing the build environment, and uses constant git stamps. Ordinary Cargo builds
+therefore no longer embed ambient build variables. A source regression checks that patch.
+The `rustpython-derive-impl 0.5.0` patch orders frozen module and macro traversal. The shared
+`provider-workflows/build.sh` uses the checked-in wasm `rustflags` and reproducible compiler
+settings; CI and release rebuild independently and compare bytes.
 
-Every official component is bound by checksums and OCI annotations to a versioned corresponding-
-source archive. That archive includes the exact provider source and complete vendored lockfile
-closure, uses offline Cargo source replacement, and documents how to modify Malachite and relink a
-new component. CI performs that modification and clean offline rebuild. The source archive/SBOM
-and component are generated release products and are never trusted merely because they exist in a
-working tree; release gates verify their bytes, manifests, and anonymous retrieval paths.
+Corresponding source is the public tagged tree, with the CycloneDX SBOM listing the locked
+packages. Shared release gates verify the component checksum, provenance and published bytes.
+There is no provider-local source-bundle or canonical-environment build pipeline.
 
 ## Host-enforced termination
 
@@ -90,21 +111,15 @@ Provider code does **not** enforce instruction fuel, wall time, or linear memory
 Wasmtime trap into a data envelope. Fuel exhaustion, epoch/Tokio deadline cancellation, memory
 allocation failure, and host input/output refusal remain host execution errors.
 
-Dekopon 0.11.1 immediate defaults are 67,108,864 bytes per memory, four memories, 100,000 table
-elements, 16 tables, 64 core instances, 1,048,576-byte input, 1,048,576-byte manifest/output,
-10,000,000 fuel, and 30 seconds. It serializes execution, creates a fresh store, uses an empty
-linker, and interrupts deadlines by epoch. Memory/input/output/fuel/timeout have CLI flags; table
-and instance ceilings do not.
-
-The exact final RustPython artifact consumes more than the immediate host's 10,000,000-fuel
-default during VM startup. That default therefore fails safely with `OutOfFuel` before user code.
-Use the documented dedicated profile (`--fuel 500000000`, `--timeout-ms 5000`) rather than treating
-the default as supported.
+An empty-linker immediate host cannot instantiate this component. Use the real broker with
+explicit HTTP linking and the dedicated profile in `docs/deployment-profile.md`: 64 MiB per
+memory, 1,000,000,000 fuel, 5,000 ms timeout, and 786,432-byte output limit. The 10,000,000
+and 50,000,000 fuel probes intentionally fail safely during VM startup in real-host tests.
 
 Broker defaults retain the same memory/table/count/input/output ceilings, provide 8,000,000,000
 fuel, and accept authorization timeouts no greater than 30 seconds. Every invocation gets a fresh
 store, async yields occur at most every `min(fuel, 10,000)` units, and Tokio applies the timeout.
-The broker linker implements only Dekopon HTTP/storage interfaces; this component imports neither.
+The broker linker implements Dekopon HTTP/storage interfaces; this component imports only HTTP.
 Use a 5,000 ms authorization timeout and 786,432-byte output authorization.
 
 A 64 MiB memory limit is per linear memory, not process RSS. With no `maxTotalMemoryBytes`, it is
@@ -117,5 +132,15 @@ measurements in `docs/deployment-profile.md`.
 Malformed capability input and unknown capabilities are stable SDK `ProviderError` failures.
 Python syntax, runtime, YAML, and result-conversion failures return bounded data with
 `ok: false`; tracebacks, locals, and stderr are omitted. Host fuel/deadline/memory/output failures
-trap outside that envelope. None of these failures imply that network, filesystem, or another
-provider was contacted: the component has no import through which that could occur.
+trap outside that envelope. Failures can follow completed HTTP requests; they do not imply rollback.
+Filesystem and generic provider calls remain unavailable.
+
+### Sticky host HTTP refusals
+
+Policy violations (including absent/wrong grants), malformed host requests,
+and host byte/call-budget exhaustion mark the invocation rejected. Although `send` returns a typed
+error to Python, the real broker checks that sticky state after guest execution and returns
+`HostCallRejected` instead of a successful guest envelope, even if the script catches the exception.
+Transport/protocol failures and provider-local JSON/status/body-limit errors do not replenish any
+budget but are ordinary bounded guest exceptions. A `maxResponseBytes` host refusal is a host error;
+the provider's smaller body cap is checked only after a host-accepted response.
