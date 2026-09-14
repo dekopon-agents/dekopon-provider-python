@@ -7,8 +7,10 @@
 - Update real-host test dependency rustls to 0.23.45 for RUSTSEC-2026-0285.
 - Ship one full HTTP `python-provider.wasm`: default-on `http` feature, `python.eval`, and
   `python` command, with native bounded `dekopon_requests` GET/HEAD and real-host grants.
-  Consolidate exact import/WIT validation, release/reproduction and offline vendor relinking;
-  remove runtime variants and bare empty-linker smoke tests. Pure scripts need no HTTP grant.
+  Keep exact import/WIT validation as provider-owned tests under the shared CI/release workflows;
+  remove runtime variants. Pure scripts need no HTTP grant; empty-linker instantiation is refused.
+- Merge #6's reusable workflow migration and RustPython VM build-environment patch. CI and release
+  call provider-workflows v3 by immutable SHA; no local build/release/source-bundle pipeline remains.
 - Move to `dekopon-provider-sdk` 0.15.0 and `dekopon-provider-sdk-testkit` 0.15.0.
   `CommandInvocation` gains `secret_use`, always `None` here: this provider proposes no secret use.
 - Bare `python <<'EOF'` with something piped now proposes `python.eval` exactly like `python -`,

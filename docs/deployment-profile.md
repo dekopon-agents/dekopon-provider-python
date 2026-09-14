@@ -40,10 +40,8 @@ function import (`send`). `tests/broker.rs` asserts 10M/50M fuel failures and no
 at 1G fuel and 64 MiB; `tests/requests.rs` exercises real multi-request grants on the same artifact.
 Pure scripts require no HTTP grant, but all invocations require HTTP linking by the broker.
 
-`./scripts/measure-final-artifact.sh python-provider.wasm` writes the machine-readable record to
-`/tmp/dekopon-python-measurements.json` and captures raw core declarations; CI uploads that record
-with its ignored review artifact. The fuel bracket above is asserted against the real broker
-host by `tests/broker.rs`, not by the measurement script.
+The shared CI log records the component size, imports and checksum; the uploaded component and
+checksum sidecar identify the exact build. The fuel bracket is asserted by `tests/broker.rs`.
 
 ## Admission and process memory
 

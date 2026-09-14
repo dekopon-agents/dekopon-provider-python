@@ -211,9 +211,8 @@ fn rejected(error: BrokerInvocationFailure, expected: &str) {
 #[tokio::test(flavor = "multi_thread")]
 async fn requests_component_enforces_each_host_grant_and_bounds_the_facade()
 -> Result<(), Box<dyn std::error::Error>> {
-    let Some(component) = std::env::var_os("DEKOPON_PYTHON_COMPONENT") else {
-        return Ok(());
-    };
+    let component = std::env::var_os("DEKOPON_PROVIDER_COMPONENT")
+        .expect("DEKOPON_PROVIDER_COMPONENT must point at the built component");
     let cache =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/broker-testkit-compile-cache");
     std::fs::create_dir_all(&cache)?;
@@ -278,11 +277,14 @@ result = [total, index.status_code, index.ok, type(index.content) is bytes, type
         let output = invoke_full(
             &broker,
             &server,
-            "requests.get(base + '/index')",
+            "try:\n    requests.get(base + '/index')\nexcept requests.RequestException:\n    pass\nresult = 'caught denial'",
             constraints,
         )
         .await;
-        rejected(output.expect_err("out of scope"), "denied");
+        rejected(
+            output.expect_err("caught out-of-scope denial remains fatal"),
+            "denied",
+        );
     }
     assert_eq!(server.count(), 3);
     let mut constraints = grant(&server);

@@ -2,10 +2,9 @@
 //!
 //! The component only fully exists when a real Wasmtime host runs it, so protocol shape, sandbox
 //! denials, YAML policy, and host resource termination are all asserted here against
-//! [`FakeBroker`] rather than through a command-line host. Each test returns early when
-//! `DEKOPON_PYTHON_COMPONENT` is unset: a plain `cargo test` then proves only that the harness
-//! compiles, while `scripts/test-broker-testkit.sh` sets the variable after building the ignored
-//! artifact and therefore exercises the real broker host.
+//! [`FakeBroker`] rather than through a command-line host. `DEKOPON_PROVIDER_COMPONENT` is
+//! required: it must point at the built component, and every test panics up front if it is
+//! unset rather than skipping silently.
 
 use std::{path::PathBuf, time::Duration};
 
@@ -14,8 +13,11 @@ use dekopon_provider_sdk_testkit::{
 };
 use serde_json::{Value, json};
 
-fn component() -> Option<PathBuf> {
-    std::env::var_os("DEKOPON_PYTHON_COMPONENT").map(PathBuf::from)
+fn component() -> PathBuf {
+    PathBuf::from(
+        std::env::var_os("DEKOPON_PROVIDER_COMPONENT")
+            .expect("DEKOPON_PROVIDER_COMPONENT must point at the built component"),
+    )
 }
 
 fn cache_directory() -> Result<PathBuf, std::io::Error> {
@@ -53,9 +55,7 @@ async fn dedicated_broker(component: &PathBuf) -> Result<FakeBroker, FakeBrokerE
 #[tokio::test(flavor = "multi_thread")]
 async fn broker_runs_success_yaml_denial_and_fresh_state() -> Result<(), Box<dyn std::error::Error>>
 {
-    let Some(component) = component() else {
-        return Ok(());
-    };
+    let component = component();
     let broker = FakeBroker::builder()
         .component(component)
         .provider("python")
@@ -150,9 +150,7 @@ result = True
 
 #[tokio::test(flavor = "multi_thread")]
 async fn broker_projects_the_exact_capability_envelope() -> Result<(), Box<dyn std::error::Error>> {
-    let Some(component) = component() else {
-        return Ok(());
-    };
+    let component = component();
     let broker = dedicated_broker(&component).await?;
 
     let success = broker
@@ -264,9 +262,7 @@ async fn broker_projects_the_exact_capability_envelope() -> Result<(), Box<dyn s
 /// invoking that proposal closes the loop.
 #[tokio::test(flavor = "multi_thread")]
 async fn broker_runs_the_python_command_word() -> Result<(), Box<dyn std::error::Error>> {
-    let Some(component) = component() else {
-        return Ok(());
-    };
+    let component = component();
     let broker = dedicated_broker(&component).await?;
     let argv =
         |words: &[&str]| -> Vec<String> { words.iter().map(|word| (*word).to_owned()).collect() };
@@ -337,9 +333,7 @@ async fn broker_runs_the_python_command_word() -> Result<(), Box<dyn std::error:
 #[tokio::test(flavor = "multi_thread")]
 async fn sandbox_denies_modules_builtins_and_every_recovery_path()
 -> Result<(), Box<dyn std::error::Error>> {
-    let Some(component) = component() else {
-        return Ok(());
-    };
+    let component = component();
     let broker = dedicated_broker(&component).await?;
     let script = r#"
 import json
@@ -475,9 +469,7 @@ result = {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn yaml_policy_rejects_every_unsafe_document() -> Result<(), Box<dyn std::error::Error>> {
-    let Some(component) = component() else {
-        return Ok(());
-    };
+    let component = component();
     let broker = dedicated_broker(&component).await?;
     let script = r#"
 import yaml
@@ -526,9 +518,7 @@ result = {"rejected": rejected, "safe": safe, "roundTrip": yaml.safe_load(dumped
 #[tokio::test(flavor = "multi_thread")]
 async fn broker_terminates_deadline_fuel_and_memory_exhaustion()
 -> Result<(), Box<dyn std::error::Error>> {
-    let Some(component) = component() else {
-        return Ok(());
-    };
+    let component = component();
     let cache = cache_directory()?;
 
     let deadline = FakeBroker::builder()
@@ -622,9 +612,7 @@ async fn broker_terminates_deadline_fuel_and_memory_exhaustion()
 #[tokio::test(flavor = "multi_thread")]
 async fn adversarial_regex_never_outlives_the_authorization_deadline()
 -> Result<(), Box<dyn std::error::Error>> {
-    let Some(component) = component() else {
-        return Ok(());
-    };
+    let component = component();
     let broker = FakeBroker::builder()
         .component(&component)
         .provider("python")
@@ -664,6 +652,32 @@ async fn adversarial_regex_never_outlives_the_authorization_deadline()
             );
         }
     }
+    Ok(())
+}
+
+/// Carries the raw-smoke assertions that `scripts/test-wasmtime-smoke.sh` made directly against
+/// `wasmtime run` before that script was deleted: `describe()` names this provider, and an
+/// `invoke` of its `python.eval` capability with the script's own `{"script": "result = 2"}`
+/// input produces the same successful result.
+#[tokio::test(flavor = "multi_thread")]
+async fn raw_smoke_describe_and_eval_match_the_deleted_script()
+-> Result<(), Box<dyn std::error::Error>> {
+    let component = component();
+    let broker = dedicated_broker(&component).await?;
+
+    let manifests: Vec<_> = broker.registry().manifests().collect();
+    assert_eq!(manifests.len(), 1);
+    assert_eq!(manifests[0].id.as_str(), "python");
+    assert_eq!(manifests[0].command_words, ["python"]);
+    assert_eq!(manifests[0].capabilities.len(), 1);
+    assert_eq!(manifests[0].capabilities[0].id.as_str(), "python.eval");
+
+    let output = broker
+        .invoke("python.eval", json!({"script": "result = 2"}))
+        .await?;
+    assert_eq!(output["ok"], true);
+    assert_eq!(output["result"], 2);
+
     Ok(())
 }
 

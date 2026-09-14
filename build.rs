@@ -7,9 +7,9 @@ fn main() {
     println!("cargo:rerun-if-changed=wit/provider.wit");
     let manifest = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("manifest directory"));
     let wit = fs::read(manifest.join("wit/provider.wit")).expect("read mirrored provider WIT");
-    println!("cargo:rerun-if-changed=wit/http/http.wit");
+    println!("cargo:rerun-if-changed=wit/deps/http.wit");
     assert_eq!(
-        sha256(&fs::read(manifest.join("wit/http/http.wit")).expect("HTTP WIT")),
+        sha256(&fs::read(manifest.join("wit/deps/http.wit")).expect("HTTP WIT")),
         "d0655d1ceba81fbd810f125cfc8fb2cbd8ad0696d91d34631b6b54f185dbc174",
         "HTTP WIT drift"
     );

@@ -5,7 +5,7 @@
 Security fixes are accepted for the newest released minor line. The owner has accepted the exact
 LGPL-3.0-only Malachite packages and the corresponding-source/relinkability design for this
 standalone optional provider. That is a project policy decision, not a claim of attorney review. The
-repository variable and immutable release gates remain mechanical publication controls.
+shared release workflow gates remain mechanical publication controls.
 
 Report suspected vulnerabilities privately through GitHub's security-advisory interface for
 `dekopon-agents/dekopon-provider-python`. Do not include secrets, production scripts, or private
@@ -31,10 +31,10 @@ retain their existing bounds. Data failures may follow successful network reques
 rollback. Resource traps stay host errors. There are no runtime OS-exit semantics.
 
 There is one supported release/OCI component, `python-provider.wasm`, one capability,
-`python.eval`, and command word `python`. `scripts/assert-component-contract.sh` validates the
+`python.eval`, and command word `python`. `tests/component_contract.rs` validates the
 sole raw guest import and exact full external WIT, rejecting WASI and extra authority.
 Componentizer adapter imports are internal to the validated component. Corresponding-source,
-SBOM, network-disconnected vendor relinking and byte reproduction cover this HTTP component.
+SBOM and shared byte reproduction cover this HTTP component.
 Disabling default features is only a developer customization, not a distribution branch.
 
 ## Authority boundary
@@ -94,21 +94,16 @@ The custom `getrandom 0.3.4` backend is deterministic and non-cryptographic. It 
 internals, while the VM uses an explicit fixed hash seed. No Python entropy surface is exposed.
 Host fuel and deadlines, rather than hash randomization, bound adversarial algorithms.
 
-RustPython 0.5.0's build script copies its complete build environment into frozen
-`_sysconfigdata`. The release builder therefore compiles a clean fixed-path source snapshot under
-an explicit non-secret environment and rejects sensitive key markers in the artifact. Its complete
-local `rustpython-derive-impl 0.5.0` patch also replaces randomized `py_freeze!` module ordering and
-map/set-backed macro token emission with ordered traversal; it does not remove or rewrite Python or
-Rust code or data. Running a plain release Cargo build is useful as a compile gate but is **not** an
-approved distributable build;
-only `scripts/build-component.sh` produces the scrubbed component.
+The vendored `rustpython-vm 0.5.0` build-script patch writes an empty `_sysconfigdata` table
+instead of freezing the build environment, and uses constant git stamps. Ordinary Cargo builds
+therefore no longer embed ambient build variables. A source regression checks that patch.
+The `rustpython-derive-impl 0.5.0` patch orders frozen module and macro traversal. The shared
+`provider-workflows/build.sh` uses the checked-in wasm `rustflags` and reproducible compiler
+settings; CI and release rebuild independently and compare bytes.
 
-Every official component is bound by checksums and OCI annotations to a versioned corresponding-
-source archive. That archive includes the exact provider source and complete vendored lockfile
-closure, uses offline Cargo source replacement, and documents how to modify Malachite and relink a
-new component. CI performs that modification and clean offline rebuild. The source archive/SBOM
-and component are generated release products and are never trusted merely because they exist in a
-working tree; release gates verify their bytes, manifests, and anonymous retrieval paths.
+Corresponding source is the public tagged tree, with the CycloneDX SBOM listing the locked
+packages. Shared release gates verify the component checksum, provenance and published bytes.
+There is no provider-local source-bundle or canonical-environment build pipeline.
 
 ## Host-enforced termination
 

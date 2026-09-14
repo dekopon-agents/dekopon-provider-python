@@ -404,7 +404,7 @@ for name, call in [('RequestException', lambda: r.get('')),
         #[test]
         fn http_wit_matches_the_published_guest_binding() {
             assert_eq!(
-                include_str!("../wit/http/http.wit"),
+                include_str!("../wit/deps/http.wit"),
                 dekopon_provider_http::HTTP_WIT
             );
         }
