@@ -32,26 +32,41 @@ rollback. Resource traps stay host errors. There are no runtime OS-exit semantic
 
 There is one supported release/OCI component, `python-provider.wasm`, one capability,
 `python.eval`, and command word `python`. `tests/component_contract.rs` validates the
-sole raw guest import and exact full external WIT, rejecting WASI and extra authority.
+two exact raw guest imports and exact full external WIT, rejecting WASI and extra authority.
 Componentizer adapter imports are internal to the validated component. Corresponding-source,
-SBOM and shared byte reproduction cover this HTTP component.
+SBOM and shared byte reproduction cover this HTTP + clock component.
 Disabling default features is only a developer customization, not a distribution branch.
+
+## Invoke-only clock boundary
+
+Default-on feature `date` pins `dekopon-provider-clock = "=0.15.0"` and adds exactly
+`dekopon:clock/wall@1.0.0`, `now-unix-millis: func() -> u64`. The native `dekopon_date` module
+exposes only zero-argument `now_unix_millis()`: one broker read per valid call, exact Python `int`
+and JSON number milliseconds since 1970-01-01T00:00:00Z (UTC). Values above
+9,007,199,254,740,991 raise bounded `OverflowError`; arguments raise `TypeError` before reading.
+Safe-result and runtime limits are unchanged. Host traps stay host errors; no fallback exists.
+
+The broker enables this clock only during authorized invocation, without a new grant or budget.
+Registration, preload, `describe`, and `run-command` do not read time. This intentionally reveals
+wall time to invoked scripts and does not guarantee monotonicity: clocks can move backward.
+It exposes no calendar, locale, timezone selection, sleep, or general `time`/`datetime` modules.
 
 ## Authority boundary
 
 The security boundary is the validated component plus a correctly configured Dekopon host, not the
 Python import hook:
 
-- the component imports only `dekopon:http/client@1.0.0`, linked by the real broker;
+- the component imports only `dekopon:http/client@1.0.0` and `dekopon:clock/wall@1.0.0`,
+  both linked by the real broker;
 - there is no WASI adapter, JavaScript/browser binding, environment, filesystem, raw socket,
-  storage, clock, entropy, subprocess, dynamic-library, or provider-dispatch import;
+  storage, entropy, subprocess, dynamic-library, or provider-dispatch import;
 - `allow_external_library` is false and the exact public import names are `json`, `re`, `yaml`, and
-  `dekopon_requests` only; private dependency modules are preloaded below the guest-visible import guard;
+  `dekopon_requests` and `dekopon_date` only; private dependency modules are preloaded below the guest-visible import guard;
 - `open`, `input`, `breakpoint`, `compile`, `eval`, and `exec` are removed after trusted frozen
   modules are preloaded; no original privileged callable is retained on a Python-reachable object;
-- the Python-visible module registry is replaced with the four exact public modules, and denied
+- the Python-visible module registry is replaced with the five exact public modules, and denied
   transitive module references are removed from loaded module namespaces;
-- `sys`, `os`, `pathlib`, `time`, `random`, `secrets`, `socket`, `ssl`, `sqlite3`, `subprocess`,
+- `sys`, `os`, `pathlib`, `time`, `datetime`, `random`, `secrets`, `socket`, `ssl`, `sqlite3`, `subprocess`,
   `threading`, `ctypes`, `tkinter`, and `webbrowser` are denied;
 - the `python` command word's `run-command` export only parses argv. It renders help and usage
   errors, or returns a `python.eval` proposal that the host authorizes exactly like a direct call;
@@ -112,14 +127,14 @@ Wasmtime trap into a data envelope. Fuel exhaustion, epoch/Tokio deadline cancel
 allocation failure, and host input/output refusal remain host execution errors.
 
 An empty-linker immediate host cannot instantiate this component. Use the real broker with
-explicit HTTP linking and the dedicated profile in `docs/deployment-profile.md`: 64 MiB per
+explicit HTTP and clock linking and the dedicated profile in `docs/deployment-profile.md`: 64 MiB per
 memory, 1,000,000,000 fuel, 5,000 ms timeout, and 786,432-byte output limit. The 10,000,000
 and 50,000,000 fuel probes intentionally fail safely during VM startup in real-host tests.
 
 Broker defaults retain the same memory/table/count/input/output ceilings, provide 8,000,000,000
 fuel, and accept authorization timeouts no greater than 30 seconds. Every invocation gets a fresh
 store, async yields occur at most every `min(fuel, 10,000)` units, and Tokio applies the timeout.
-The broker linker implements Dekopon HTTP/storage interfaces; this component imports only HTTP.
+The broker linker supplies HTTP and invoke-only clock interfaces to this component.
 Use a 5,000 ms authorization timeout and 786,432-byte output authorization.
 
 A 64 MiB memory limit is per linear memory, not process RSS. With no `maxTotalMemoryBytes`, it is

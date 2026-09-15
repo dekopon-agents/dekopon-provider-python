@@ -23,24 +23,17 @@ use crate::{COMMAND_WORD, EVAL};
 const PIPED: &str = "-";
 
 /// What `--help` prints below the options: the contract a model needs before writing a script.
-#[cfg(feature = "http")]
-const AFTER_HELP: &str = "Proposes python.eval. Pure scripts need no HTTP grant.
-Imports json, re, yaml, and dekopon_requests (GET/HEAD only).
-Every HTTP call is constrained by the host invocation grant; no credentials,
-redirects, retries, sockets, filesystem, clock, or input().
-Script: at most 65,536 UTF-8 bytes. print() is bounded to 65,536 bytes.
-Assign a safe JSON-shaped value to result. Runtime output is bounded JSON with
-ok/stdout/stdoutTruncated/result (or error), not an OS exit status.";
+fn after_help() -> String {
+    let mut help = String::from("Proposes python.eval. Imports json, re, and yaml.\n");
+    #[cfg(feature = "http")]
+    help.push_str("dekopon_requests: GET/HEAD only, constrained by the host invocation grant.\nPure scripts need no HTTP grant. No credentials, redirects, or retries.\n");
+    #[cfg(feature = "date")]
+    help.push_str("dekopon_date.now_unix_millis(): no arguments; exact int milliseconds since\n1970-01-01T00:00:00Z (UTC), read once per call from the invoke-only broker clock.\nNo grant needed; wall time may move backward. Above 9007199254740991: OverflowError.\n");
+    help.push_str("No time/datetime, sockets, filesystem, or input().\nScript: at most 65,536 UTF-8 bytes. print() is bounded to 65,536 bytes.\nAssign a safe JSON-shaped value to result. Runtime output is bounded JSON with\nok/stdout/stdoutTruncated/result (or error), not an OS exit status.");
+    help
+}
 
-#[cfg(not(feature = "http"))]
-const AFTER_HELP: &str = "Proposes python.eval. Imports json, re, and yaml; no host authority.";
-
-#[cfg(not(feature = "http"))]
-pub(crate) const ABOUT: &str =
-    "Run one Python 3 script in a fresh, import-free RustPython 0.5.0 VM";
-#[cfg(feature = "http")]
-pub(crate) const ABOUT: &str =
-    "Run one Python 3 script with broker-granted HTTP in a fresh RustPython 0.5.0 VM";
+pub(crate) const ABOUT: &str = "Run one constrained Python 3 script in a fresh RustPython 0.5.0 VM";
 
 // The `python` tree, declared once and rendered by clap. Plain comments, not doc comments: clap
 // renders a doc comment as the `about` line above `Usage:`.
@@ -50,7 +43,7 @@ pub(crate) const ABOUT: &str =
     version,
     about = ABOUT,
     override_usage = "python -c <CODE>\n       python - <<'EOF'\n       python <<'EOF'",
-    after_help = AFTER_HELP,
+    after_help = after_help(),
     group = clap::ArgGroup::new("script").args(["code", "piped"]).required(true),
 )]
 struct Python {
@@ -144,11 +137,11 @@ mod tests {
 
     /// The help page, byte for byte. It is the only documentation a model reads before writing a
     /// script, so a change to it is a diff a reviewer sees.
-    #[cfg(feature = "http")]
+    #[cfg(all(feature = "http", feature = "date"))]
     #[test]
     fn help_is_pinned_byte_for_byte() {
         const HELP: &str = "\
-Run one Python 3 script with broker-granted HTTP in a fresh RustPython 0.5.0 VM
+Run one constrained Python 3 script in a fresh RustPython 0.5.0 VM
 
 Usage: python -c <CODE>
        python - <<'EOF'
@@ -162,10 +155,13 @@ Options:
   -h, --help     Print help
   -V, --version  Print version
 
-Proposes python.eval. Pure scripts need no HTTP grant.
-Imports json, re, yaml, and dekopon_requests (GET/HEAD only).
-Every HTTP call is constrained by the host invocation grant; no credentials,
-redirects, retries, sockets, filesystem, clock, or input().
+Proposes python.eval. Imports json, re, and yaml.
+dekopon_requests: GET/HEAD only, constrained by the host invocation grant.
+Pure scripts need no HTTP grant. No credentials, redirects, or retries.
+dekopon_date.now_unix_millis(): no arguments; exact int milliseconds since
+1970-01-01T00:00:00Z (UTC), read once per call from the invoke-only broker clock.
+No grant needed; wall time may move backward. Above 9007199254740991: OverflowError.
+No time/datetime, sockets, filesystem, or input().
 Script: at most 65,536 UTF-8 bytes. print() is bounded to 65,536 bytes.
 Assign a safe JSON-shaped value to result. Runtime output is bounded JSON with
 ok/stdout/stdoutTruncated/result (or error), not an OS exit status.

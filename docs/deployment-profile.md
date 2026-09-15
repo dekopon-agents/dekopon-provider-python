@@ -18,6 +18,7 @@ source, lockfile, compiler, or componentizer change.
 | capability timeout | 5,000 ms | authorization constraint |
 | capability output | 786,432 bytes | authorization constraint |
 | HTTP | narrow invocation grant; absent denies requests | real broker HTTP linker |
+| wall time | invoke-only, no new grant or budget | broker clock linker |
 | storage | none | no storage import |
 
 The broker's default 2 MiB frame exceeds the required output-plus-64-KiB margin; the protocol hard
@@ -30,15 +31,17 @@ intentionally asserted as safe failures and are not working profiles for RustPyt
 
 ## Measured artifact
 
-The full HTTP component replaces the earlier v0.4.0 zero-import artifact. Do not reuse its
+The HTTP + clock component replaces the earlier HTTP-only and v0.4.0 zero-import artifacts. Do not reuse its
 size, digest, table declarations or memory minimum as measurements of this build. The exact-head
 CI review artifact contains the current size/digest record. Bytes are reproducible per platform,
 not promised identical across macOS and Linux.
 
-The contract gate enforces one external interface (`dekopon:http/client@1.0.0`) and one raw core
-function import (`send`). `tests/broker.rs` asserts 10M/50M fuel failures and normal operation
+The contract gate enforces exactly two external interfaces (`dekopon:http/client@1.0.0` and
+`dekopon:clock/wall@1.0.0`) and two raw core function imports (`send` and `now-unix-millis`). `tests/broker.rs` asserts 10M/50M fuel failures and normal operation
 at 1G fuel and 64 MiB; `tests/requests.rs` exercises real multi-request grants on the same artifact.
-Pure scripts require no HTTP grant, but all invocations require HTTP linking by the broker.
+Pure scripts require no HTTP grant, but all invocations require HTTP and clock linking by the broker.
+`dekopon_date.now_unix_millis()` returns exact integer UTC Unix epoch milliseconds; the clock is
+invoke-only, requires no grant, and may move backward. Neither preload nor command/describe reads it.
 
 The shared CI log records the component size, imports and checksum; the uploaded component and
 checksum sidecar identify the exact build. The fuel bracket is asserted by `tests/broker.rs`.
@@ -51,7 +54,7 @@ compiled code, Cranelift/component compilation, or host allocations. Compilation
 fuel and invocation deadlines.
 
 A single cold compiler process was measured at up to roughly 591 MB RSS on the v0.1.0 build, when
-a command-line host still existed to measure it under `/usr/bin/time`. That historical figure is not a measurement or bound for the current HTTP component. Until platform-specific RSS and
+a command-line host still existed to measure it under `/usr/bin/time`. That historical figure is not a measurement or bound for the current HTTP + clock component. Until platform-specific RSS and
 concurrency load tests establish a tighter number, budget at least
 **768 MiB plus admitted concurrent guest reservations** for one compiler/connection profile; do
 not derive a container limit from the 64 MiB store ceiling alone.

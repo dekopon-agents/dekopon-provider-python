@@ -4,6 +4,10 @@
 
 ### Added
 
+- Default-on `date` feature with exactly `dekopon_date.now_unix_millis()`: bounded exact integer
+  UTC Unix epoch milliseconds from the invoke-only broker clock, with no new grant or budget.
+  Pin `dekopon-provider-clock` 0.15.0; validate exact HTTP + clock authority and real-host calls.
+
 - Update real-host test dependency rustls to 0.23.45 for RUSTSEC-2026-0285.
 - Ship one full HTTP `python-provider.wasm`: default-on `http` feature, `python.eval`, and
   `python` command, with native bounded `dekopon_requests` GET/HEAD and real-host grants.
