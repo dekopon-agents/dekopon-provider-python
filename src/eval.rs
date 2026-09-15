@@ -93,6 +93,8 @@ pub(crate) fn interpreter() -> Interpreter {
     ]);
     #[cfg(feature = "http")]
     definitions.push(crate::requests::requests_module::module_def(&builder.ctx));
+    #[cfg(feature = "date")]
+    definitions.push(crate::date::date_module::module_def(&builder.ctx));
     builder
         .add_native_modules(&definitions)
         .add_frozen_modules(rustpython_pylib::FROZEN_STDLIB)
@@ -223,6 +225,30 @@ mod tests {
     }
 
     #[test]
+    fn date_import_is_pure_and_has_exact_public_surface() {
+        let output = evaluate(
+            "import dekopon_date\nfrom dekopon_date import now_unix_millis\nresult = [name for name in dir(dekopon_date) if not name.startswith('_')]",
+        );
+        #[cfg(feature = "date")]
+        assert_eq!(output["result"], json!(["now_unix_millis"]), "{output}");
+        #[cfg(not(feature = "date"))]
+        assert_eq!(output["error"]["type"], "ImportError", "{output}");
+    }
+
+    #[cfg(feature = "date")]
+    #[test]
+    fn date_rejects_arguments_before_unavailable_native_clock() {
+        for arguments in ["1", "1, 2", "unexpected=1", "1, unexpected=2"] {
+            let output = evaluate(&format!(
+                "import dekopon_date\ndekopon_date.now_unix_millis({arguments})"
+            ));
+            assert_eq!(output["ok"], false, "{output}");
+            assert_eq!(output["error"]["kind"], "runtime", "{output}");
+            assert_eq!(output["error"]["type"], "TypeError", "{output}");
+        }
+    }
+
+    #[test]
     fn evaluates_python_three_with_supported_modules_and_native_yaml() {
         let output = evaluate(
             r#"
@@ -264,6 +290,7 @@ result = {
             "import os",
             "import sys",
             "import time",
+            "import datetime",
             "import random",
             "import secrets",
             "import socket",

@@ -1,6 +1,6 @@
 # Dekopon Python provider
 
-A WebAssembly component with broker-granted HTTP exposing one read-only, High-risk capability:
+A WebAssembly component with broker-granted HTTP and invoke-only wall time exposing one read-only, High-risk capability:
 `python.eval`. It embeds **RustPython 0.5.0 exactly**, creates a fresh interpreter per call,
 captures bounded stdout in Rust, and returns only a bounded JSON-shaped result. A Dekopon shell
 reaches it through the `python` command word. Version 0.4.0 targets `dekopon-provider-sdk` 0.15.0
@@ -17,10 +17,11 @@ load it.
 ## Broker-granted HTTP
 
 The supported release/OCI component is **`python-provider.wasm`**, exposing **`python.eval`**
-and command word **`python`**. Cargo feature `http` is default-on and keeps Dekopon-specific
-HTTP code clearly separated; disabling defaults is a developer customization, not a supported
-CI or distribution variant. Ordinary Cargo builds include `dekopon_requests`.
-The sole external import is **`dekopon:http/client@1.0.0`**. A real broker must link it even for
+and command word **`python`**. Cargo features `http` and `date` are default-on and keep Dekopon-specific
+HTTP and clock code clearly separated; disabling defaults is a developer customization, not a supported
+CI or distribution variant. Ordinary Cargo builds include `dekopon_requests` and `dekopon_date`.
+The exact external imports are **`dekopon:http/client@1.0.0`** and
+**`dekopon:clock/wall@1.0.0`**. A real broker must link both even for
 pure scripts, which succeed without HTTP grants. Bare empty-linker Wasmtime cannot instantiate it.
 
 Configure the broker's route/constraint set for `python.eval` with an explicit `http` grant:
@@ -64,8 +65,8 @@ The native facade is intentionally not the pip `requests` package:
 - Runtime output is the existing JSON `ok/stdout/stdoutTruncated/result` or error envelope, **not an
   OS exit status**. Stdout and result limits do not increase for HTTP.
 
-The shared workflow builds and reproduces this one shipped HTTP component and generates its SBOM.
-Provider-owned `tests/component_contract.rs` checks the exact HTTP-only authority and WIT shape.
+The shared workflow builds and reproduces this one shipped HTTP + clock component and generates its SBOM.
+Provider-owned `tests/component_contract.rs` checks the exact HTTP + clock authority and WIT shape.
 `tests/requests.rs` uses FakeBroker for no-grant denial and its real registry with published
 `AuthorizationGate`/HTTP constraints for the controlled-server tests. It does not test Cedar policy
 selection; it tests production host enforcement of preauthorized grants without a transport mock.
@@ -137,7 +138,7 @@ in — `python <<'EOF' … EOF` matches CPython's own read of a non-tty stdin wh
 
 ## Running it
 
-Use a Dekopon broker that links the published HTTP interface. The real-host smoke, protocol,
+Use a Dekopon broker that links the published HTTP and clock interfaces. The real-host smoke, protocol,
 resource and HTTP-grant suites all exercise the same shipped component:
 
 ```console
@@ -230,7 +231,8 @@ submodules such as `re._parser` and `json.decoder` are denied:
 - `re` — RustPython's Python regular-expression module / `_sre` implementation;
 - `yaml` — this provider's native constrained facade with exactly `safe_load(str)`,
   `safe_dump(safe_value)`, and `YAMLError`;
-- `dekopon_requests` — bounded GET/HEAD under the invocation HTTP grant described above.
+- `dekopon_requests` — bounded GET/HEAD under the invocation HTTP grant described above;
+- `dekopon_date` — exactly `now_unix_millis()`, described below.
 
 Example:
 
@@ -252,11 +254,31 @@ alias expansion. Timestamp-looking plain scalars such as `2025-02-03` remain str
 This is RustPython 0.5.0 with the tested module/value subset, not CPython conformance, arbitrary
 stdlib/package compatibility, pip, or persistence.
 
+## Invoke-only wall time
+
+```python
+import dekopon_date
+result = dekopon_date.now_unix_millis()
+```
+
+The sole function takes zero arguments and returns an exact Python `int`, serialized as a JSON
+number: milliseconds since **1970-01-01T00:00:00Z**, the UTC Unix epoch. Each valid call reads the
+broker clock exactly once. Values 0 through 9,007,199,254,740,991 are accepted; larger host values
+raise bounded `OverflowError`, never clamp, round, or truncate. Positional or keyword arguments
+raise `TypeError` before any clock read. Existing runtime envelopes and safe-result limits apply;
+host traps remain host errors, with no fallback clock.
+
+The default-on `date` feature uses exactly `dekopon-provider-clock = "=0.15.0"`. The broker supplies
+wall time during authorized `invoke` only, without a new grant or budget. Registration, module
+preload, `describe`, and `run-command` never read it. Wall time can move backward; this is not a
+monotonic API. No calendar rendering, locale/timezone selection, fractional seconds, or sleep is
+provided; `time` and `datetime` remain denied.
+
 ## Denied authority and determinism
 
-The exact component contract allows only Dekopon HTTP. There is no WASI, JS/browser, host
-environment, filesystem, raw socket, storage, clock, entropy, subprocess, dynamic loading, or
-generic provider dispatch. Imports including `sys`, `os`, `time`, `random`, `secrets`, `socket`,
+The exact component contract allows only Dekopon HTTP and invoke-only wall time. There is no WASI, JS/browser, host
+environment, filesystem, raw socket, storage, entropy, subprocess, dynamic loading, or
+generic provider dispatch. Imports including `sys`, `os`, `time`, `datetime`, `random`, `secrets`, `socket`,
 `ssl`, `sqlite3`, `subprocess`, `threading`, `ctypes`, `tkinter`, and `webbrowser` are denied.
 `open`, `input`, and `breakpoint` are absent; guest `compile`, `eval`, and `exec` are denied.
 

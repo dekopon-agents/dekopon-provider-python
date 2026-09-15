@@ -2,7 +2,7 @@
 use std::{path::PathBuf, process::Command};
 
 #[test]
-fn component_has_exact_http_only_authority() {
+fn component_has_exact_http_and_clock_authority() {
     let component = std::env::var_os("DEKOPON_PROVIDER_COMPONENT")
         .expect("DEKOPON_PROVIDER_COMPONENT must point at the built component");
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));

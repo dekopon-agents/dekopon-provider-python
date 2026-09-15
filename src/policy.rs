@@ -6,13 +6,16 @@ const ALLOWED_MODULES: &[&str] = &[
     "yaml",
     #[cfg(feature = "http")]
     "dekopon_requests",
+    #[cfg(feature = "date")]
+    "dekopon_date",
 ];
 const REMOVED_BUILTINS: [&str; 6] = ["open", "input", "breakpoint", "compile", "eval", "exec"];
-const DENIED_MODULES: [&str; 15] = [
+const DENIED_MODULES: [&str; 16] = [
     "sys",
     "os",
     "pathlib",
     "time",
+    "datetime",
     "random",
     "secrets",
     "socket",
@@ -240,12 +243,19 @@ mod tests {
         for allowed in ["json", "re", "yaml"] {
             assert!(is_allowed_module(allowed), "{allowed}");
         }
+        assert_eq!(is_allowed_module("dekopon_date"), cfg!(feature = "date"));
+        assert_eq!(
+            is_allowed_module("dekopon_requests"),
+            cfg!(feature = "http")
+        );
         for denied in [
+            "dekopon_date.wall",
             "re._parser",
             "json.decoder",
             "sys",
             "os",
             "time",
+            "datetime",
             "random",
             "socket",
             "subprocess",

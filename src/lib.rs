@@ -1,6 +1,7 @@
 //! A single constrained RustPython capability for Dekopon, and the `python` command word for it.
 //!
-//! The default-on `http` feature imports only broker-mediated HTTP. Every invocation creates a
+//! Default-on `http` and `date` import broker-mediated HTTP and invoke-only wall time.
+//! Every invocation creates a
 //! fresh VM, captures bounded stdout in Rust, and projects only an explicitly bounded JSON value
 //! model. Resource termination remains a
 //! host responsibility: provider code cannot catch Wasmtime fuel, deadline, or memory traps.
@@ -10,6 +11,8 @@
 
 mod capture;
 mod commands;
+#[cfg(feature = "date")]
+mod date;
 mod entropy;
 mod eval;
 mod exception;

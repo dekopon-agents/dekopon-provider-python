@@ -15,7 +15,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 include!("fixtures/requests_json_objects.rs");
@@ -232,11 +232,36 @@ async fn requests_component_enforces_each_host_grant_and_bounds_the_facade()
     let pure = broker
         .invoke(
             "python.eval",
-            json!({"script": "import dekopon_requests\nprint('no grant needed')\nresult = 42"}),
+            json!({"script": "import dekopon_requests\nimport dekopon_date\nprint('no grant needed')\nresult = 42"}),
         )
         .await?;
     assert_eq!(pure["result"], 42);
     assert_eq!(pure["stdout"], "no grant needed\n");
+    let before = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis();
+    let date = broker
+        .invoke(
+            "python.eval",
+            json!({"script": "import dekopon_date\nresult = dekopon_date.now_unix_millis()\nassert type(result) is int"}),
+        )
+        .await?;
+    let after = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis();
+    assert_eq!(date["ok"], true, "{date}");
+    assert_eq!(date["stdout"], "");
+    assert_eq!(date["stdoutTruncated"], false);
+    let millis = date["result"].as_u64().expect("exact JSON integer");
+    assert!((before..=after).contains(&u128::from(millis)), "{date}");
+    for arguments in ["1", "unexpected=1"] {
+        let output = broker
+            .invoke(
+                "python.eval",
+                json!({"script": format!(
+                    "import dekopon_date\ndekopon_date.now_unix_millis({arguments})"
+                )}),
+            )
+            .await?;
+        assert_eq!(output["ok"], false, "{output}");
+        assert_eq!(output["error"]["type"], "TypeError", "{output}");
+    }
     let server = Server::start();
     let no_grant = broker.invoke("python.eval", json!({"script": format!("import dekopon_requests as requests\nrequests.get('http://{}/index')", server.authority)})).await.expect_err("no HTTP grant");
     assert!(
