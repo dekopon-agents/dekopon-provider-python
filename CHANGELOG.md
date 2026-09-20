@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-20
+
+### Changed
+
+- Move to SDK 0.18.0 and HTTP 1.1.0; Python commands and buffered GET/HEAD behavior are unchanged.
+
+## [0.5.0]
+
 ### Added
 
 - Update real-host test dependency rustls to 0.23.45 for RUSTSEC-2026-0285.

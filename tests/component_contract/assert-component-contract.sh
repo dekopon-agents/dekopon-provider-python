@@ -20,10 +20,10 @@ import pathlib, re, sys
 text = pathlib.Path(sys.argv[1]).read_text()
 imports = [line.strip() for line in text.splitlines() if '(import ' in line]
 assert len(imports) == 1, imports
-assert re.fullmatch(r'\(import "dekopon:http/client@1\.0\.0" "send" \(func .*', imports[0]), imports
+assert re.fullmatch(r'\(import "dekopon:http/client@1\.1\.0" "send" \(func .*', imports[0]), imports
 PY
 else
   wasm-tools component wit -j "$file" >"$temporary/actual.json"
-  wasm-tools component wit -j "$root/wit/deps/http.wit" >"$temporary/http.json"
+  wasm-tools component wit -j "$root/wit/" >"$temporary/http.json"
   python3 "$root/tests/component_contract/assert-component-wit.py" "$temporary/actual.json" "$temporary/http.json"
 fi

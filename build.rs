@@ -10,13 +10,13 @@ fn main() {
     println!("cargo:rerun-if-changed=wit/deps/http.wit");
     assert_eq!(
         sha256(&fs::read(manifest.join("wit/deps/http.wit")).expect("HTTP WIT")),
-        "d0655d1ceba81fbd810f125cfc8fb2cbd8ad0696d91d34631b6b54f185dbc174",
+        "fb4adbee97e56ab8984f894c4611e0e96825d23f4d58fa1cc5706dee0513202c",
         "HTTP WIT drift"
     );
     let actual = sha256(&wit);
     assert_eq!(
         actual, PROVIDER_WIT_SHA256,
-        "wit/provider.wit drifted from dekopon-provider-sdk 0.15.0"
+        "wit/provider.wit drifted from dekopon-provider-sdk 0.18.0"
     );
 }
 

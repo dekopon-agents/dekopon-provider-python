@@ -2,7 +2,7 @@
 
 [package]
 name = "dekopon-python-provider"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2024"
 rust-version = "1.98.1"
 license = "MIT OR Apache-2.0"
@@ -19,8 +19,8 @@ default = ["http"]
 http = ["dep:dekopon-provider-http"]
 
 [dependencies]
-dekopon-provider-http = { version = "=0.15.0", optional = true }
-dekopon-provider-sdk = { version = "=0.15.0", features = ["clap"] }
+dekopon-provider-http = { version = "=0.18.0", optional = true }
+dekopon-provider-sdk = { version = "=0.18.0", features = ["clap"] }
 getrandom = "=0.3.4"
 num-traits = "=0.2.19"
 rustpython-common = "=0.5.0"
@@ -35,8 +35,8 @@ wit-bindgen = { version = "=0.62.0", default-features = false, features = ["macr
 yaml-rust2 = { version = "=0.12.0", default-features = false }
 
 [dev-dependencies]
-dekopon-capability = "=0.15.0"
-dekopon-provider-sdk-testkit = "=0.15.0"
+dekopon-capability = "=0.18.0"
+dekopon-provider-sdk-testkit = "=0.18.0"
 tokio = { version = "=1.49.0", default-features = false, features = ["macros", "rt-multi-thread"] }
 
 [patch.crates-io]

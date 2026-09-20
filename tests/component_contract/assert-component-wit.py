@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
-"""Compare the entire HTTP interface structurally to the byte-pinned guest WIT."""
+"""Compare the entire buffered HTTP closure to the byte-pinned guest WIT."""
 import json
 import sys
 
+from http_contract import buffered_http_contract
+
 actual, expected = [json.load(open(path, encoding="utf-8")) for path in sys.argv[1:]]
+expected = buffered_http_contract(expected)
 assert len(actual["worlds"]) == 1
 world = actual["worlds"][0]
 assert world["name"] == "root"
 assert world["imports"] == {"interface-0": {"interface": {"id": 0}}}, world["imports"]
 assert actual["packages"] == [
-    {"name": "dekopon:http@1.0.0", "interfaces": {"client": 0}, "worlds": {}},
+    {"name": "dekopon:http@1.1.0", "interfaces": {"client": 0}, "worlds": {}},
     {"name": "root:component", "interfaces": {}, "worlds": {"root": 0}},
 ]
 assert actual["interfaces"][0]["package"] == 0
