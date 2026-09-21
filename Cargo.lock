@@ -795,7 +795,7 @@ dependencies = [
 
 [[package]]
 name = "dekopon-python-provider"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "dekopon-capability",
  "dekopon-provider-http",
@@ -809,6 +809,7 @@ dependencies = [
  "rustpython-vm",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "wit-bindgen 0.62.0",
  "yaml-rust2",

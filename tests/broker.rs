@@ -13,25 +13,13 @@ use dekopon_provider_sdk_testkit::{
 };
 use serde_json::{Value, json};
 
+mod support;
+
 fn component() -> PathBuf {
     PathBuf::from(
         std::env::var_os("DEKOPON_PROVIDER_COMPONENT")
             .expect("DEKOPON_PROVIDER_COMPONENT must point at the built component"),
     )
-}
-
-fn cache_directory() -> Result<PathBuf, std::io::Error> {
-    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let directory = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("target")
-        .join("broker-testkit-compile-cache")
-        .join(format!(
-            "{}-{}",
-            std::process::id(),
-            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-        ));
-    std::fs::create_dir_all(&directory)?;
-    directory.canonicalize()
 }
 
 fn dedicated_limits() -> BrokerHostLimits {
@@ -44,33 +32,33 @@ fn dedicated_limits() -> BrokerHostLimits {
 
 /// A broker on the dedicated immediate profile: 64 MiB, 1G fuel, 5 s, 768 KiB of output.
 async fn dedicated_broker(component: &PathBuf) -> Result<FakeBroker, FakeBrokerError> {
-    FakeBroker::builder()
-        .component(component)
-        .provider("python")
-        .host_limits(BrokerHostLimits {
-            max_memory_bytes: 64 * 1024 * 1024,
-            ..dedicated_limits()
-        })
-        .compile_cache(cache_directory()?)
-        .timeout_ms(5_000)
-        .max_output_bytes(786_432)
-        .build()
-        .await
+    support::build_broker(
+        FakeBroker::builder()
+            .component(component)
+            .provider("python")
+            .host_limits(BrokerHostLimits {
+                max_memory_bytes: 64 * 1024 * 1024,
+                ..dedicated_limits()
+            })
+            .timeout_ms(5_000)
+            .max_output_bytes(786_432),
+    )
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn broker_runs_success_yaml_denial_and_fresh_state() -> Result<(), Box<dyn std::error::Error>>
 {
     let component = component();
-    let broker = FakeBroker::builder()
-        .component(component)
-        .provider("python")
-        .host_limits(dedicated_limits())
-        .compile_cache(cache_directory()?)
-        .timeout_ms(5_000)
-        .max_output_bytes(786_432)
-        .build()
-        .await?;
+    let broker = support::build_broker(
+        FakeBroker::builder()
+            .component(component)
+            .provider("python")
+            .host_limits(dedicated_limits())
+            .timeout_ms(5_000)
+            .max_output_bytes(786_432),
+    )
+    .await?;
 
     let first = broker
         .invoke(
@@ -525,17 +513,15 @@ result = {"rejected": rejected, "safe": safe, "roundTrip": yaml.safe_load(dumped
 async fn broker_terminates_deadline_fuel_and_memory_exhaustion()
 -> Result<(), Box<dyn std::error::Error>> {
     let component = component();
-    let cache = cache_directory()?;
-
-    let deadline = FakeBroker::builder()
-        .component(&component)
-        .provider("python")
-        .host_limits(dedicated_limits())
-        .compile_cache(&cache)
-        .timeout_ms(50)
-        .max_output_bytes(786_432)
-        .build()
-        .await?;
+    let deadline = support::build_broker(
+        FakeBroker::builder()
+            .component(&component)
+            .provider("python")
+            .host_limits(dedicated_limits())
+            .timeout_ms(50)
+            .max_output_bytes(786_432),
+    )
+    .await?;
     let deadline_error = match deadline
         .invoke("python.eval", json!({"script": "while True:\n    pass"}))
         .await
@@ -555,19 +541,19 @@ async fn broker_terminates_deadline_fuel_and_memory_exhaustion()
     // The measured startup bracket for this exact build: RustPython never reaches guest code
     // under either probe, and the dedicated 1G profile below runs it comfortably.
     for fuel in [10_000_000_u64, 50_000_000] {
-        let low_fuel = FakeBroker::builder()
-            .component(&component)
-            .provider("python")
-            .host_limits(BrokerHostLimits {
-                fuel,
-                max_timeout: Duration::from_secs(5),
-                ..BrokerHostLimits::default()
-            })
-            .compile_cache(&cache)
-            .timeout_ms(5_000)
-            .max_output_bytes(786_432)
-            .build()
-            .await?;
+        let low_fuel = support::build_broker(
+            FakeBroker::builder()
+                .component(&component)
+                .provider("python")
+                .host_limits(BrokerHostLimits {
+                    fuel,
+                    max_timeout: Duration::from_secs(5),
+                    ..BrokerHostLimits::default()
+                })
+                .timeout_ms(5_000)
+                .max_output_bytes(786_432),
+        )
+        .await?;
         let fuel_error = match low_fuel
             .invoke("python.eval", json!({"script": "result = 2"}))
             .await
@@ -619,20 +605,20 @@ async fn broker_terminates_deadline_fuel_and_memory_exhaustion()
 async fn adversarial_regex_never_outlives_the_authorization_deadline()
 -> Result<(), Box<dyn std::error::Error>> {
     let component = component();
-    let broker = FakeBroker::builder()
-        .component(&component)
-        .provider("python")
-        .host_limits(BrokerHostLimits {
-            max_memory_bytes: 64 * 1024 * 1024,
-            fuel: 8_000_000_000,
-            max_timeout: Duration::from_secs(5),
-            ..BrokerHostLimits::default()
-        })
-        .compile_cache(cache_directory()?)
-        .timeout_ms(250)
-        .max_output_bytes(786_432)
-        .build()
-        .await?;
+    let broker = support::build_broker(
+        FakeBroker::builder()
+            .component(&component)
+            .provider("python")
+            .host_limits(BrokerHostLimits {
+                max_memory_bytes: 64 * 1024 * 1024,
+                fuel: 8_000_000_000,
+                max_timeout: Duration::from_secs(5),
+                ..BrokerHostLimits::default()
+            })
+            .timeout_ms(250)
+            .max_output_bytes(786_432),
+    )
+    .await?;
 
     // Either the value envelope carries the outcome or the host stops it; both are acceptable,
     // running past the 250 ms authorization-equivalent deadline is not.

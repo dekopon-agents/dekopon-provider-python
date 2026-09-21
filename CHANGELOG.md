@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-09-21
+
+### Fixed
+
+- Compile the component once per integration-test binary using a shared, process-local testkit
+  cache. Coordinate broker loading to avoid concurrent cache publishers while preserving parallel
+  invocations, independent host limits, and all sandbox and HTTP-grant coverage.
+
 ## [0.6.0] - 2026-09-20
 
 ### Changed
