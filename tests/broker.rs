@@ -21,9 +21,15 @@ fn component() -> PathBuf {
 }
 
 fn cache_directory() -> Result<PathBuf, std::io::Error> {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let directory = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("target")
-        .join("broker-testkit-compile-cache");
+        .join("broker-testkit-compile-cache")
+        .join(format!(
+            "{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
     std::fs::create_dir_all(&directory)?;
     directory.canonicalize()
 }

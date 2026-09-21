@@ -7,12 +7,14 @@ import subprocess
 import tempfile
 import unittest
 
+from http_contract import buffered_http_contract
+
 ROOT = Path(__file__).resolve().parent.parent.parent
 
 
 class ComponentContractTests(unittest.TestCase):
     def test_raw_guest_rejects_missing_extra_and_wasi_imports(self):
-        send = '(import "dekopon:http/client@1.0.0" "send" (func))'
+        send = '(import "dekopon:http/client@1.1.0" "send" (func))'
         with tempfile.TemporaryDirectory() as directory:
             core = Path(directory) / "guest.wasm"
             for imports, accepted in [
@@ -21,6 +23,9 @@ class ComponentContractTests(unittest.TestCase):
                 (send + '(import "extra" "call" (func))', False),
                 ('(import "wasi:cli/run@0.2.0" "run" (func))', False),
                 (send.replace('"send"', '"other"'), False),
+                (send.replace("@1.1.0", "@1.0.0"), False),
+                (send + '(import "dekopon:http/client@1.1.0" "stream" (func))', False),
+                (send + '(import "dekopon:asset/asset@0.1.0" "open" (func))', False),
             ]:
                 subprocess.run(
                     ["wasm-tools", "parse", "-o", str(core), "-"],
@@ -34,10 +39,10 @@ class ComponentContractTests(unittest.TestCase):
 
     def test_full_wit_rejects_authority_and_signature_drift(self):
         expected = json.loads(subprocess.check_output(
-            ["wasm-tools", "component", "wit", "-j", str(ROOT / "wit/deps/http.wit")],
+            ["wasm-tools", "component", "wit", "-j", str(ROOT / "wit")],
             text=True,
         ))
-        actual = copy.deepcopy(expected)
+        actual = buffered_http_contract(expected)
         count = len(actual["types"])
         actual["types"].extend([
             {"name": None, "kind": {"list": "string"}, "owner": None},
@@ -56,7 +61,7 @@ class ComponentContractTests(unittest.TestCase):
             "interface-0": {"interface": {"id": 0}},
         }, "exports": exports}]
         actual["packages"] = [
-            {"name": "dekopon:http@1.0.0", "interfaces": {"client": 0}, "worlds": {}},
+            {"name": "dekopon:http@1.1.0", "interfaces": {"client": 0}, "worlds": {}},
             {"name": "root:component", "interfaces": {}, "worlds": {"root": 0}},
         ]
         cases = [(actual, True)]
@@ -68,6 +73,9 @@ class ComponentContractTests(unittest.TestCase):
             lambda x: x["worlds"][0]["exports"]["invoke"]["function"].update(result="bool"),
             lambda x: x["types"][-1].update(kind={"list": "string"}),
             lambda x: x["types"].append({"kind": {"list": "u8"}}),
+            lambda x: x["interfaces"][0]["functions"].update(stream={}),
+            lambda x: x["packages"][0].update(name="dekopon:http@1.0.0"),
+            lambda x: x["types"][3]["kind"]["record"]["fields"][0].update(type="bool"),
         ]:
             changed = copy.deepcopy(actual)
             mutation(changed)

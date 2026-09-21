@@ -3,7 +3,7 @@
 A WebAssembly component with broker-granted HTTP exposing one read-only, High-risk capability:
 `python.eval`. It embeds **RustPython 0.5.0 exactly**, creates a fresh interpreter per call,
 captures bounded stdout in Rust, and returns only a bounded JSON-shaped result. A Dekopon shell
-reaches it through the `python` command word. Version 0.4.0 targets `dekopon-provider-sdk` 0.15.0
+reaches it through the `python` command word. Version 0.6.0 targets `dekopon-provider-sdk` 0.18.0
 and exports `run-command` from `dekopon:provider/provider-cli@0.3.0`; an 0.11-era host will not
 load it.
 
@@ -20,7 +20,7 @@ The supported release/OCI component is **`python-provider.wasm`**, exposing **`p
 and command word **`python`**. Cargo feature `http` is default-on and keeps Dekopon-specific
 HTTP code clearly separated; disabling defaults is a developer customization, not a supported
 CI or distribution variant. Ordinary Cargo builds include `dekopon_requests`.
-The sole external import is **`dekopon:http/client@1.0.0`**. A real broker must link it even for
+The sole external import is **`dekopon:http/client@1.1.0`**. A real broker must link it even for
 pure scripts, which succeed without HTTP grants. Bare empty-linker Wasmtime cannot instantiate it.
 
 Configure the broker's route/constraint set for `python.eval` with an explicit `http` grant:

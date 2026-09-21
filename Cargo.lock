@@ -376,7 +376,7 @@ version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fa961b519f0b462e3a3b4a34b64d119eeaca1d59af726fe450bbba07a9fc0a1"
 dependencies = [
- "thiserror 2.0.20",
+ "thiserror",
 ]
 
 [[package]]
@@ -670,93 +670,119 @@ dependencies = [
 
 [[package]]
 name = "dekopon-broker-host"
-version = "0.15.0"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fff83205715de95c99e8dbca2b1820d70002a9c5be89e2779ff84fd1c68eb5f4"
+checksum = "ccdf59e36dfaadfa504bbb22c99f228f782de7b14176ed8cded9d5ba16367dc5"
 dependencies = [
+ "dekopon-broker-protocol",
  "dekopon-capability",
  "dekopon-core",
  "dekopon-http-host",
  "dekopon-provider-sdk",
  "dekopon-storage-host",
+ "rustix",
  "serde",
  "serde_json",
  "sha2 0.11.0",
- "thiserror 2.0.20",
+ "tempfile",
+ "thiserror",
  "tokio",
  "tracing",
  "wasmtime",
 ]
 
 [[package]]
-name = "dekopon-capability"
-version = "0.15.0"
+name = "dekopon-broker-protocol"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "766afe13fcfb25cb24afd00a4894e6a8e3f73ba3158540ea9a83b2c0e6f1ff03"
+checksum = "94140ee250344dbdf7baf6161bfcafd4fcd8c6cb5134ab3f43b4282f33f7b1c2"
+dependencies = [
+ "dekopon-capability",
+ "dekopon-core",
+ "dekopon-provider-sdk",
+ "rustix",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "dekopon-capability"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5acc0ac4887e591790c0664c9ac6a99a90ae9a5d5886b1959654d9b628f52a20"
 dependencies = [
  "dekopon-core",
  "serde",
  "serde_json",
- "thiserror 2.0.20",
+ "thiserror",
 ]
 
 [[package]]
 name = "dekopon-core"
-version = "0.15.0"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a15f8ce2bae51613640f4d46fec4b2add00ff6a59b3f57e3559233ebd8360805"
+checksum = "d54a000153d3293fd1cb69b7d06dcd81f67020f8fdcb2c7950ca33b3cddf914c"
 dependencies = [
+ "base64 0.23.1",
  "libc",
  "serde",
- "thiserror 2.0.20",
+ "thiserror",
 ]
 
 [[package]]
 name = "dekopon-http-host"
-version = "0.15.0"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3385376046a5bd75f8e1493b2357f74e0bf7054a55993d5444debc95cd9110c"
+checksum = "d4f7ba4ea4c6a27962c4b04757b7e4987b1ec21dcc5cdbc9aa758d66c7bea7fb"
 dependencies = [
  "base64 0.23.1",
+ "bytes",
  "dekopon-capability",
  "dekopon-core",
  "futures-util",
+ "http-body",
  "reqwest",
  "serde",
- "thiserror 2.0.20",
+ "sha2 0.11.0",
+ "tempfile",
+ "thiserror",
  "tokio",
  "tracing",
 ]
 
 [[package]]
 name = "dekopon-provider-http"
-version = "0.15.0"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3f1f4d513a0365d093ac5d332612430c326664e4ebcd625d536d05594ad4410d"
+checksum = "8c03adc8911ea341af25c72d62de1a46987de8e1fe0a0747108204cf18b1648d"
 dependencies = [
+ "dekopon-provider-sdk",
  "wit-bindgen 0.62.0",
 ]
 
 [[package]]
 name = "dekopon-provider-sdk"
-version = "0.15.0"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85099a8b9d7fe66a653ea4e3621ccc490df6e84d54632de64e2022e4cc983ac9"
+checksum = "9515272aebb214495fe656a0616f9e0cbbb3d7730563fb5d4ebe75b8c376346c"
 dependencies = [
  "clap",
  "dekopon-capability",
  "dekopon-core",
  "serde",
  "serde_json",
- "thiserror 2.0.20",
+ "thiserror",
  "wasmtime",
+ "wit-bindgen 0.62.0",
 ]
 
 [[package]]
 name = "dekopon-provider-sdk-testkit"
-version = "0.15.0"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a185a6011778654d9cfb61be4c22ea4f4549f0cad9bc90e8a0a44e6e097ac70c"
+checksum = "16fa8f762117ef758d6a328a181f7b9d85284da96ec29e0f301317e71d63efdc"
 dependencies = [
  "dekopon-broker-host",
  "dekopon-capability",
@@ -764,12 +790,12 @@ dependencies = [
  "dekopon-storage-host",
  "serde_json",
  "tempfile",
- "thiserror 2.0.20",
+ "thiserror",
 ]
 
 [[package]]
 name = "dekopon-python-provider"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "dekopon-capability",
  "dekopon-provider-http",
@@ -790,9 +816,9 @@ dependencies = [
 
 [[package]]
 name = "dekopon-storage-host"
-version = "0.15.0"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "740d853e2d7aaed18f963b654a0c054cc54659c625674cb7896989ce66b3fd2a"
+checksum = "bf1556905d1a25ba871e1d16722eea5923f3445058548ed01fa5c92319cdcb24"
 dependencies = [
  "dekopon-capability",
  "dekopon-core",
@@ -801,7 +827,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.0",
- "thiserror 2.0.20",
+ "thiserror",
  "tracing",
 ]
 
@@ -836,27 +862,6 @@ dependencies = [
  "block-buffer 0.12.1",
  "const-oid",
  "crypto-common 0.2.2",
-]
-
-[[package]]
-name = "directories-next"
-version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "339ee130d97a610ea5a5872d2bbb130fdf68884ff09d3028b81bec8a1ac23bbc"
-dependencies = [
- "cfg-if",
- "dirs-sys-next",
-]
-
-[[package]]
-name = "dirs-sys-next"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ebda144c4fe02d1f7ea1a7d9641b6fc6b580adcfa024ae48797ecdeb6825b4d"
-dependencies = [
- "libc",
- "redox_users",
- "winapi",
 ]
 
 [[package]]
@@ -1722,15 +1727,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 
 [[package]]
-name = "libredox"
-version = "0.1.20"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "28d0a00925a9f930d679b6789b721e3a7f9ed110f41b86d2497caa780c3a070a"
-dependencies = [
- "libc",
-]
-
-[[package]]
 name = "libz-rs-sys"
 version = "0.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2360,7 +2356,7 @@ dependencies = [
  "rustc-hash",
  "rustls",
  "socket2",
- "thiserror 2.0.20",
+ "thiserror",
  "tokio",
  "tracing",
  "web-time",
@@ -2382,7 +2378,7 @@ dependencies = [
  "rustls",
  "rustls-pki-types",
  "slab",
- "thiserror 2.0.20",
+ "thiserror",
  "tinyvec",
  "tracing",
  "web-time",
@@ -2556,17 +2552,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed2bf2547551a7053d6fdfafda3f938979645c44812fbfcda098faae3f1a362d"
 dependencies = [
  "bitflags",
-]
-
-[[package]]
-name = "redox_users"
-version = "0.4.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba009ff324d1fc1b900bd1fdb31564febe58a8ccc8a6fdbb93b543d33b13ca43"
-dependencies = [
- "getrandom 0.2.17",
- "libredox",
- "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -2768,7 +2753,7 @@ dependencies = [
  "rustpython-ruff_python_ast",
  "rustpython-ruff_text_size",
  "rustpython-wtf8",
- "thiserror 2.0.20",
+ "thiserror",
  "unicode_names2 2.0.0",
 ]
 
@@ -2812,7 +2797,7 @@ dependencies = [
  "rustpython-ruff_python_parser",
  "rustpython-ruff_source_file",
  "rustpython-ruff_text_size",
- "thiserror 2.0.20",
+ "thiserror",
 ]
 
 [[package]]
@@ -2907,7 +2892,7 @@ dependencies = [
  "rustpython-ruff_python_trivia",
  "rustpython-ruff_source_file",
  "rustpython-ruff_text_size",
- "thiserror 2.0.20",
+ "thiserror",
 ]
 
 [[package]]
@@ -3108,7 +3093,7 @@ dependencies = [
  "static_assertions",
  "strum",
  "strum_macros",
- "thiserror 2.0.20",
+ "thiserror",
  "timsort",
  "uname",
  "unic-ucd-bidi",
@@ -3247,15 +3232,6 @@ dependencies = [
  "serde",
  "serde_core",
  "zmij",
-]
-
-[[package]]
-name = "serde_spanned"
-version = "1.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6662b5879511e06e8999a8a235d848113e942c9124f211511b16466ee2995f26"
-dependencies = [
- "serde_core",
 ]
 
 [[package]]
@@ -3511,31 +3487,11 @@ checksum = "c13547615a44dc9c452a8a534638acdf07120d4b6847c8178705da06306a3057"
 
 [[package]]
 name = "thiserror"
-version = "1.0.69"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6aaf5339b578ea85b50e080feb250a3e8ae8cfcdff9a461c9ec2904bc923f52"
-dependencies = [
- "thiserror-impl 1.0.69",
-]
-
-[[package]]
-name = "thiserror"
 version = "2.0.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec86235f5fcc2a73650310756d2ac5b138a5780bbbdfae3eeccec992c435ba4f"
 dependencies = [
- "thiserror-impl 2.0.20",
-]
-
-[[package]]
-name = "thiserror-impl"
-version = "1.0.69"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4fee6c4efc90059e10f81e6d42c60a18f76588c3d74cb83a0b242a2b6c7504c1"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
+ "thiserror-impl",
 ]
 
 [[package]]
@@ -3629,45 +3585,6 @@ dependencies = [
  "pin-project-lite",
  "tokio",
 ]
-
-[[package]]
-name = "toml"
-version = "0.9.12+spec-1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf92845e79fc2e2def6a5d828f0801e29a2f8acc037becc5ab08595c7d5e9863"
-dependencies = [
- "indexmap",
- "serde_core",
- "serde_spanned",
- "toml_datetime",
- "toml_parser",
- "toml_writer",
- "winnow 0.7.15",
-]
-
-[[package]]
-name = "toml_datetime"
-version = "0.7.5+spec-1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "92e1cfed4a3038bc5a127e35a2d360f145e1f4b971b551a2ba5fd7aedf7e1347"
-dependencies = [
- "serde_core",
-]
-
-[[package]]
-name = "toml_parser"
-version = "1.1.3+spec-1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d38ac1cf9b95face32296c0a3ede1fdc270627c9d9c02a7274dd6d960dc4d56"
-dependencies = [
- "winnow 1.0.4",
-]
-
-[[package]]
-name = "toml_writer"
-version = "1.1.2+spec-1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d56353a2a665ad0f41a421187180aab746c8c325620617ad883a99a1cbe66d2"
 
 [[package]]
 name = "tower"
@@ -4201,7 +4118,6 @@ dependencies = [
  "target-lexicon",
  "wasmparser 0.254.0",
  "wasmtime-environ",
- "wasmtime-internal-cache",
  "wasmtime-internal-component-macro",
  "wasmtime-internal-component-util",
  "wasmtime-internal-core",
@@ -4243,26 +4159,6 @@ dependencies = [
  "wasmprinter",
  "wasmtime-internal-component-util",
  "wasmtime-internal-core",
-]
-
-[[package]]
-name = "wasmtime-internal-cache"
-version = "48.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f6e6198ced397a98ebbc95dc8085f73e4bab8c12cae66c179a04c859a69677b3"
-dependencies = [
- "base64 0.22.1",
- "directories-next",
- "log",
- "postcard",
- "rustix",
- "serde",
- "serde_derive",
- "sha2 0.10.9",
- "toml",
- "wasmtime-environ",
- "windows-sys 0.61.2",
- "zstd",
 ]
 
 [[package]]
@@ -4315,7 +4211,7 @@ dependencies = [
  "pulley-interpreter",
  "smallvec",
  "target-lexicon",
- "thiserror 2.0.20",
+ "thiserror",
  "wasmparser 0.254.0",
  "wasmtime-environ",
  "wasmtime-internal-core",
@@ -4705,18 +4601,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6bbff5f0aada427a1e5a6da5f1f98158182f26556f345ac9e04d36d0ebed650"
 
 [[package]]
-name = "winnow"
-version = "0.7.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df79d97927682d2fd8adb29682d1140b343be4ac0f08fd68b7765d9c059d3945"
-
-[[package]]
-name = "winnow"
-version = "1.0.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "23b97319f7b8343df12cc98938e5c3eb436064524c8d2b4e30a1d3a36eecdf81"
-
-[[package]]
 name = "wit-bindgen"
 version = "0.57.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4992,31 +4876,3 @@ name = "zmij"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
-
-[[package]]
-name = "zstd"
-version = "0.13.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e91ee311a569c327171651566e07972200e76fcfe2242a4fa446149a3881c08a"
-dependencies = [
- "zstd-safe",
-]
-
-[[package]]
-name = "zstd-safe"
-version = "7.2.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f49c4d5f0abb602a93fb8736af2a4f4dd9512e36f7f570d66e65ff867ed3b9d"
-dependencies = [
- "zstd-sys",
-]
-
-[[package]]
-name = "zstd-sys"
-version = "2.0.16+zstd.1.5.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91e19ebc2adc8f83e43039e79776e3fda8ca919132d68a1fed6a5faca2683748"
-dependencies = [
- "cc",
- "pkg-config",
-]

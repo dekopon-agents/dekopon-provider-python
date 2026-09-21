@@ -151,6 +151,7 @@ fn grant(server: &Server) -> ExecutionConstraints {
             max_response_bytes: 262_144,
             allow_plaintext_loopback: true,
         }),
+        asset: None,
         storage: None,
         secret_use: None,
     }
@@ -186,7 +187,7 @@ async fn invoke_full(
         .unwrap();
     broker
         .registry()
-        .invoke(authorized, None)
+        .invoke(authorized, None, Default::default())
         .await
         .map(|output| output.output)
 }
