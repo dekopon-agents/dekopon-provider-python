@@ -20,6 +20,8 @@ use std::{
 
 include!("fixtures/requests_json_objects.rs");
 
+mod support;
+
 struct Server {
     authority: String,
     seen: Arc<Mutex<Vec<String>>>,
@@ -214,22 +216,19 @@ async fn requests_component_enforces_each_host_grant_and_bounds_the_facade()
 -> Result<(), Box<dyn std::error::Error>> {
     let component = std::env::var_os("DEKOPON_PROVIDER_COMPONENT")
         .expect("DEKOPON_PROVIDER_COMPONENT must point at the built component");
-    let cache =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/broker-testkit-compile-cache");
-    std::fs::create_dir_all(&cache)?;
-    let broker = FakeBroker::builder()
-        .component(PathBuf::from(component))
-        .provider("python")
-        .compile_cache(cache.canonicalize()?)
-        .host_limits(BrokerHostLimits {
-            fuel: 1_000_000_000,
-            max_timeout: Duration::from_secs(5),
-            ..BrokerHostLimits::default()
-        })
-        .timeout_ms(5_000)
-        .max_output_bytes(786_432)
-        .build()
-        .await?;
+    let broker = support::build_broker(
+        FakeBroker::builder()
+            .component(PathBuf::from(component))
+            .provider("python")
+            .host_limits(BrokerHostLimits {
+                fuel: 1_000_000_000,
+                max_timeout: Duration::from_secs(5),
+                ..BrokerHostLimits::default()
+            })
+            .timeout_ms(5_000)
+            .max_output_bytes(786_432),
+    )
+    .await?;
     let pure = broker
         .invoke(
             "python.eval",
