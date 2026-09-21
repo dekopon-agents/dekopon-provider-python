@@ -3,7 +3,7 @@
 A WebAssembly component with broker-granted HTTP exposing one read-only, High-risk capability:
 `python.eval`. It embeds **RustPython 0.5.0 exactly**, creates a fresh interpreter per call,
 captures bounded stdout in Rust, and returns only a bounded JSON-shaped result. A Dekopon shell
-reaches it through the `python` command word. Version 0.6.0 targets `dekopon-provider-sdk` 0.18.0
+reaches it through the `python` command word. Version 0.6.1 targets `dekopon-provider-sdk` 0.18.0
 and exports `run-command` from `dekopon:provider/provider-cli@0.3.0`; an 0.11-era host will not
 load it.
 
