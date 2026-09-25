@@ -10,6 +10,8 @@
 
 mod capture;
 mod commands;
+#[cfg(feature = "engine-swap")]
+mod engine;
 mod entropy;
 mod eval;
 mod exception;
