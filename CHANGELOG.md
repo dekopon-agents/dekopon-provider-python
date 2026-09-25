@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-09-25
+
+### Fixed
+
+- Send a fixed `User-Agent: dekopon-provider-python/<version>` on every `dekopon_requests` call.
+  crates.io answered 403 to every request because none was sent. Scripts still set no headers.
+
 ## [0.6.1] - 2026-09-21
 
 ### Fixed

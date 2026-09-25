@@ -53,6 +53,8 @@ The native facade is intentionally not the pip `requests` package:
 
 - Only `get(url)` and `head(url)`, with a UTF-8 string URL of at most 8,192 bytes; no optional
   arguments, headers, body, credentials, cookies, sessions, proxies, retries, or redirect following.
+- Every request carries the fixed `User-Agent: dekopon-provider-python/<version>`; public APIs
+  such as crates.io refuse requests without one.
 - `Response.status_code`, `ok` (status below 400), `content` (bytes), `text` (UTF-8 with replacement),
   `json()` (strict JSON projected through the existing safe-value limits), and `raise_for_status()`
   (raises at status 400 or above). HEAD content is empty. Redirect statuses are returned unchanged.

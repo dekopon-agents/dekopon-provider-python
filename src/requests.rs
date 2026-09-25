@@ -414,8 +414,15 @@ for name, call in [('RequestException', lambda: r.get('')),
         if url.len() > URL_BYTES {
             return Err(exception(vm, error(vm), "URL exceeds 8192 UTF-8 bytes"));
         }
+        // crates.io and other public APIs refuse a request without one; scripts set no headers.
+        let user_agent = dekopon_provider_http::Header::text(
+            "user-agent",
+            concat!("dekopon-provider-python/", env!("CARGO_PKG_VERSION")),
+        )
+        .map_err(|_| exception(vm, error(vm), "invalid user-agent"))?;
         let request = dekopon_provider_http::Request::new(method, url)
-            .map_err(|_| exception(vm, error(vm), "invalid URL"))?;
+            .map_err(|_| exception(vm, error(vm), "invalid URL"))?
+            .with_header(user_agent);
         let response = dekopon_provider_http::send(request)
             // Stable code only: never copy remote text, URL, or potentially sensitive host detail.
             .map_err(|failure| exception(vm, error(vm), failure.code.as_str()))?;
