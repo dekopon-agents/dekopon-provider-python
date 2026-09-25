@@ -72,6 +72,11 @@ impl Server {
                 recorded.lock().unwrap().push(line.clone());
                 assert!(!request.to_ascii_lowercase().contains("authorization:"));
                 assert!(!request.to_ascii_lowercase().contains("cookie:"));
+                assert!(request.to_ascii_lowercase().contains(concat!(
+                    "\r\nuser-agent: dekopon-provider-python/",
+                    env!("CARGO_PKG_VERSION"),
+                    "\r\n"
+                )));
                 let path = line.split_whitespace().nth(1).unwrap_or("");
                 let (status, body, extra) = match path {
                     "/index" => (200, br#"["/one","/two"]"#.to_vec(), ""),
