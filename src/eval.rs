@@ -93,6 +93,8 @@ pub(crate) fn interpreter() -> Interpreter {
     ]);
     #[cfg(feature = "http")]
     definitions.push(crate::requests::requests_module::module_def(&builder.ctx));
+    #[cfg(feature = "engine-swap")]
+    definitions.push(crate::engine::engine_module::module_def(&builder.ctx));
     builder
         .add_native_modules(&definitions)
         .add_frozen_modules(rustpython_pylib::FROZEN_STDLIB)

@@ -1,0 +1,12 @@
+package dekopon:engine@0.1.0;
+
+interface api {
+    engine-name: func() -> string;
+    live-count: func() -> u32;
+    burn: func(iterations: u32) -> u32;
+    allocate: func(bytes: u32) -> u32;
+    resource counter {
+        constructor();
+        get: func() -> string;
+    }
+}

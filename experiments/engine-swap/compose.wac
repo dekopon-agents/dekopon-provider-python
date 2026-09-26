@@ -1,0 +1,8 @@
+package experiment:python-engine-swap;
+
+let engine = new experiment:engine {};
+let python = new experiment:python {
+    "dekopon:engine/api@0.1.0": engine["dekopon:engine/api@0.1.0"],
+    ...
+};
+export python...;

@@ -6,6 +6,8 @@ const ALLOWED_MODULES: &[&str] = &[
     "yaml",
     #[cfg(feature = "http")]
     "dekopon_requests",
+    #[cfg(feature = "engine-swap")]
+    "dekopon_engine",
 ];
 const REMOVED_BUILTINS: [&str; 6] = ["open", "input", "breakpoint", "compile", "eval", "exec"];
 const DENIED_MODULES: [&str; 15] = [
