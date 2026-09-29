@@ -73,4 +73,9 @@ allow-workspace = true
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-allow-git = []
+# Core PR 354 provides the unreleased 0.23 SDK/testkit/HTTP identity at an immutable revision.
+allow-git = [
+  "https://github.com/dekopon-agents/dekopon.git",
+  # Reviewed 55.1 portability port, pinned identically for the full DataFusion crate graph.
+  "https://github.com/dekopon-agents/datafusion.git",
+]

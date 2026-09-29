@@ -1,95 +1,70 @@
 #!/usr/bin/env python3
-"""Negative regressions for the shipped component's exact authority and WIT contract."""
+"""Negative authority and full WIT shape fixtures for the built combined component."""
 import copy
 import json
+import os
 from pathlib import Path
 import subprocess
 import tempfile
 import unittest
 
-from http_contract import buffered_http_contract
-
 ROOT = Path(__file__).resolve().parent.parent.parent
+CHECKER = ROOT / "tests/component_contract/assert-component-contract.sh"
+WIT_CHECKER = ROOT / "tests/component_contract/assert-component-wit.py"
+RAW = [
+    '(import "dekopon:http/client@1.1.0" "send" (func))',
+    '(import "dekopon:clock/monotonic@1.1.0" "now-nanos" (func))',
+    '(import "dekopon:clock/wall@1.1.0" "now-unix-millis" (func))',
+    '(import "dekopon:random/source@0.1.0" "get-random-bytes" (func))',
+]
 
 
 class ComponentContractTests(unittest.TestCase):
     def test_raw_guest_rejects_missing_extra_and_wasi_imports(self):
-        send = '(import "dekopon:http/client@1.1.0" "send" (func))'
         with tempfile.TemporaryDirectory() as directory:
             core = Path(directory) / "guest.wasm"
             for imports, accepted in [
-                (send, True),
-                ("", False),
-                (send + '(import "extra" "call" (func))', False),
-                ('(import "wasi:cli/run@0.2.0" "run" (func))', False),
-                (send.replace('"send"', '"other"'), False),
-                (send.replace("@1.1.0", "@1.0.0"), False),
-                (send + '(import "dekopon:http/client@1.1.0" "stream" (func))', False),
-                (send + '(import "dekopon:asset/asset@0.1.0" "open" (func))', False),
+                (RAW, True),
+                (RAW[:-1], False),
+                (RAW + ['(import "extra" "call" (func))'], False),
+                (RAW + ['(import "wasi:cli/run@0.2.0" "run" (func))'], False),
+                ([RAW[0].replace('"send"', '"stream"')] + RAW[1:], False),
+                ([RAW[0].replace('@1.1.0', '@1.0.0')] + RAW[1:], False),
+                (RAW[:-1] + [RAW[-1].replace('get-random-bytes', 'not-random')], False),
+                (RAW[:-2] + [RAW[-2].replace('now-unix-millis', 'now-nanos'), RAW[-1]], False),
             ]:
-                subprocess.run(
-                    ["wasm-tools", "parse", "-o", str(core), "-"],
-                    input=f"(module {imports})", text=True, check=True,
-                )
-                result = subprocess.run(
-                    [str(ROOT / "tests/component_contract/assert-component-contract.sh"), str(core)],
-                    capture_output=True, text=True,
-                )
+                subprocess.run(["wasm-tools", "parse", "-o", str(core), "-"],
+                               input=f"(module {' '.join(imports)})", text=True, check=True)
+                result = subprocess.run([str(CHECKER), str(core)], capture_output=True, text=True)
                 self.assertEqual(result.returncode == 0, accepted, result.stderr)
 
     def test_full_wit_rejects_authority_and_signature_drift(self):
-        expected = json.loads(subprocess.check_output(
-            ["wasm-tools", "component", "wit", "-j", str(ROOT / "wit")],
-            text=True,
-        ))
-        actual = buffered_http_contract(expected)
-        count = len(actual["types"])
-        actual["types"].extend([
-            {"name": None, "kind": {"list": "string"}, "owner": None},
-            {"name": None, "kind": {"option": "string"}, "owner": None},
-        ])
-        exports = {}
-        for name, params in [
-            ("describe", []),
-            ("invoke", [{"name": "capability", "type": "string"},
-                        {"name": "input-json", "type": "string"}]),
-            ("run-command", [{"name": "argv", "type": count},
-                             {"name": "stdin", "type": count + 1}]),
-        ]:
-            exports[name] = {"function": {"params": params, "result": "string"}}
-        actual["worlds"] = [{"name": "root", "imports": {
-            "interface-0": {"interface": {"id": 0}},
-        }, "exports": exports}]
-        actual["packages"] = [
-            {"name": "dekopon:http@1.1.0", "interfaces": {"client": 0}, "worlds": {}},
-            {"name": "root:component", "interfaces": {}, "worlds": {"root": 0}},
-        ]
-        cases = [(actual, True)]
-        for mutation in [
-            lambda x: x["worlds"][0]["imports"].clear(),
-            lambda x: x["worlds"][0]["imports"].update({"extra": {"function": {}}}),
-            lambda x: x["packages"][0].update(name="wasi:http@0.2.0"),
-            lambda x: x["interfaces"][0].update(name="other"),
-            lambda x: x["worlds"][0]["exports"]["invoke"]["function"].update(result="bool"),
-            lambda x: x["types"][-1].update(kind={"list": "string"}),
-            lambda x: x["types"].append({"kind": {"list": "u8"}}),
-            lambda x: x["interfaces"][0]["functions"].update(stream={}),
-            lambda x: x["packages"][0].update(name="dekopon:http@1.0.0"),
-            lambda x: x["types"][3]["kind"]["record"]["fields"][0].update(type="bool"),
-        ]:
-            changed = copy.deepcopy(actual)
-            mutation(changed)
-            cases.append((changed, False))
+        component = os.environ["DEKOPON_PROVIDER_COMPONENT"]
+        actual = json.loads(subprocess.check_output(
+            ["wasm-tools", "component", "wit", "-j", component], text=True))
         with tempfile.TemporaryDirectory() as directory:
-            expected_path = Path(directory) / "expected.json"
+            mirror_path = Path(directory) / "mirror.json"
             actual_path = Path(directory) / "actual.json"
-            expected_path.write_text(json.dumps(expected))
+            mirror_path.write_bytes(subprocess.check_output(
+                ["wasm-tools", "component", "wit", "-j", str(ROOT / "wit")]))
+            cases = [(actual, True)]
+            for mutation in [
+                lambda x: x["worlds"][0]["imports"].pop("interface-0"),
+                lambda x: x["worlds"][0]["imports"].update({"extra": {"function": {}}}),
+                lambda x: x["packages"][0].update(name="wasi:clock@1.1.0"),
+                lambda x: x["interfaces"][2]["functions"]["get-random-bytes"].update(result="string"),
+                lambda x: x["interfaces"][3]["functions"].update(stream={}),
+                lambda x: x["worlds"][0]["exports"]["invoke"]["function"].update(result="bool"),
+                lambda x: x["types"][-1].update(kind={"list": "string"}),
+                lambda x: x["types"].append({"kind": {"list": "u8"}}),
+            ]:
+                changed = copy.deepcopy(actual)
+                mutation(changed)
+                cases.append((changed, False))
             for fixture, accepted in cases:
                 actual_path.write_text(json.dumps(fixture))
-                result = subprocess.run(
-                    ["python3", str(ROOT / "tests/component_contract/assert-component-wit.py"),
-                     str(actual_path), str(expected_path)], capture_output=True, text=True,
-                )
+                result = subprocess.run(["python3", str(WIT_CHECKER), str(actual_path),
+                                         str(mirror_path)], capture_output=True, text=True)
                 self.assertEqual(result.returncode == 0, accepted, result.stderr)
 
 
