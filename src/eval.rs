@@ -89,6 +89,8 @@ pub(crate) fn interpreter() -> Interpreter {
         crate::capture::stdout_module::module_def(&builder.ctx),
         crate::capture::stderr_module::module_def(&builder.ctx),
         crate::policy::policy_module::module_def(&builder.ctx),
+        crate::numeric::numeric_module::module_def(&builder.ctx),
+        crate::tables::tables_module::module_def(&builder.ctx),
         crate::yaml::yaml_module::module_def(&builder.ctx),
     ]);
     #[cfg(feature = "http")]

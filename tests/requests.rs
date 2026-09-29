@@ -157,6 +157,7 @@ fn grant(server: &Server) -> ExecutionConstraints {
             max_request_bytes: 16_384,
             max_response_bytes: 262_144,
             allow_plaintext_loopback: true,
+            propagate_trace: false,
         }),
         asset: None,
         storage: None,

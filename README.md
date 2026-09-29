@@ -1,11 +1,14 @@
 # Dekopon Python provider
 
 A WebAssembly component with broker-granted HTTP exposing one read-only, High-risk capability:
-`python.eval`. It embeds **RustPython 0.5.0 exactly**, creates a fresh interpreter per call,
-captures bounded stdout in Rust, and returns only a bounded JSON-shaped result. A Dekopon shell
-reaches it through the `python` command word. Version 0.6.1 targets `dekopon-provider-sdk` 0.18.0
-and exports `run-command` from `dekopon:provider/provider-cli@0.3.0`; an 0.11-era host will not
-load it.
+`python.eval`. The **0.7.0-alpha.1 candidate** embeds RustPython 0.5.0, DataFusion
+55.1.0, ndarray 0.17.2, statrs 0.19.1 and SmartCore 0.6.14 in one component. It creates a fresh
+interpreter per call, captures bounded stdout, and returns only a bounded JSON-shaped result.
+The `python` command word remains pure. The candidate host/SDK dependency is core PR 354
+revision `820ee7a521201828ed42171f1ead5e75026595d2` (0.23.0); the DataFusion
+55.1.0 no-JS port is pinned to the public fork commit
+`cf3778098ad3ea283ecd8ee2a991be7d9a29750c`. The SDK/host remains unreleased;
+production brokers without the clock/random imports cannot run this component.
 
 > **Release status: owner-approved.** The owner accepted the exact LGPL dependencies for this
 > standalone optional provider; this records a project policy choice, not attorney review. LGPL is
@@ -20,8 +23,13 @@ The supported release/OCI component is **`python-provider.wasm`**, exposing **`p
 and command word **`python`**. Cargo feature `http` is default-on and keeps Dekopon-specific
 HTTP code clearly separated; disabling defaults is a developer customization, not a supported
 CI or distribution variant. Ordinary Cargo builds include `dekopon_requests`.
-The sole external import is **`dekopon:http/client@1.1.0`**. A real broker must link it even for
-pure scripts, which succeed without HTTP grants. Bare empty-linker Wasmtime cannot instantiate it.
+The combined component imports exactly `dekopon:http/client@1.1.0.send`,
+`dekopon:clock/monotonic@1.1.0.now-nanos`, `dekopon:clock/wall@1.1.0.now-unix-millis`, and
+`dekopon:random/source@0.1.0.get-random-bytes`. The latter three power SQL internals and
+getrandom 0.3; the VM hash seed remains deliberately fixed. There is no Python-visible time,
+random, filesystem, or socket API. A candidate broker host with these imports must load the
+component, even for pure scripts; HTTP is still invocation-granted. Bare empty-linker Wasmtime
+cannot instantiate it.
 
 Configure the broker's route/constraint set for `python.eval` with an explicit `http` grant:
 `allowedHosts` (exact authorities, including effective nondefault port), `allowedMethods` (`GET`
@@ -66,11 +74,39 @@ The native facade is intentionally not the pip `requests` package:
 - Runtime output is the existing JSON `ok/stdout/stdoutTruncated/result` or error envelope, **not an
   OS exit status**. Stdout and result limits do not increase for HTTP.
 
-The shared workflow builds and reproduces this one shipped HTTP component and generates its SBOM.
-Provider-owned `tests/component_contract.rs` checks the exact HTTP-only authority and WIT shape.
+The shared workflow must reproduce the pinned combined candidate before alpha publication.
+Provider-owned `tests/component_contract.rs` checks the exact four-import authority and WIT shape.
 `tests/requests.rs` uses FakeBroker for no-grant denial and its real registry with published
 `AuthorizationGate`/HTTP constraints for the controlled-server tests. It does not test Cedar policy
 selection; it tests production host enforcement of preauthorized grants without a transport mock.
+
+## Combined in-memory alpha facade
+
+`dekopon_tables.query(sql, tables)` takes one SELECT query and a dict of named row-array tables
+(e.g. `{'people': [{'id': 1, 'group': 'a'}]}`). Each nonempty table has matching column keys in
+every row and homogeneous bool, signed integer, finite float or text columns; nulls are allowed
+with a non-null type witness. Names are short ASCII identifiers. It returns
+`{'columns': [...], 'rows': [[...], ...]}` of bounded JSON-safe values. Up to 4 tables, 8 columns
+per table, 256 input rows total, 128 KiB table JSON, 4 KiB SQL, 256 output rows, 16 result
+columns and 128 KiB result; output types outside the safe scalar/date projection are errors.
+DDL, DML, multi-statement SQL, COPY and external table scans are refused. The per-call DataFusion
+runtime has disk manager disabled, one query partition and an 8 MiB query memory pool (not a
+whole-process allocation ceiling). No table survives an invocation; no CSV/path/Parquet scans,
+persistent dataframe object, or binary export is exposed.
+
+`dekopon_numeric` provides `vector_add`, `dot`, `matrix_multiply`, `column_means`, `normal_cdf`,
+`linear_regression` (training-set predictions) and `kmeans` (training-set labels; explicit u64
+seed). Inputs are bounded exact list/tuple numeric arrays with finite values of magnitude <=1e6.
+See source constants for shape/work bounds; output is JSON-safe, not a NumPy/sklearn model.
+Neither module permits direct import of backend packages. The original result/stdout/HTTP ceilings
+and guarded import registry remain unchanged.
+
+This is an **alpha engine integration**, not the completed toolkit in external `SCOPE.md`:
+in-memory streams/collections/math/decimal/CSV/date parsing, URL/HTML/Unicode/fuzzy extraction,
+compression, general table construction/Arrow/Parquet/CSV bytes, chart/report generation,
+spreadsheet/PDF/NLP/chemistry/embedding/model workflows, asset input/output and notebook package
+API compatibility remain unimplemented. SQL wall time is statement-stable and does not introduce
+`datetime.now`. No Turso or path storage is included.
 
 ## Build
 
@@ -84,8 +120,9 @@ and component checks all run through the shared
 cargo fmt --all --check
 cargo clippy --locked --workspace --all-targets -- -D warnings
 cargo deny --all-features check bans licenses sources advisories
-../provider-workflows/build.sh
-DEKOPON_PROVIDER_COMPONENT=$PWD/python-provider.wasm cargo test --locked --workspace
+# The supported shared CI builds, componentizes, verifies and reproduces the release artifact.
+# For local source validation use ordinary Cargo with the worktree's default target; do not
+# execute local build scripts that override compiler, wrapper or target settings.
 ```
 
 `../provider-workflows/build.sh` is a sibling checkout of the shared workflows repository (see its

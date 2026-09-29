@@ -1,6 +1,7 @@
 //! A single constrained RustPython capability for Dekopon, and the `python` command word for it.
 //!
-//! The default-on `http` feature imports only broker-mediated HTTP. Every invocation creates a
+//! The default build imports broker-mediated HTTP plus invocation-only SQL clocks and entropy.
+//! Every invocation creates a
 //! fresh VM, captures bounded stdout in Rust, and projects only an explicitly bounded JSON value
 //! model. Resource termination remains a
 //! host responsibility: provider code cannot catch Wasmtime fuel, deadline, or memory traps.
@@ -16,9 +17,11 @@ mod entropy;
 mod eval;
 mod exception;
 mod limits;
+mod numeric;
 mod policy;
 #[cfg(feature = "http")]
 mod requests;
+mod tables;
 mod value;
 mod yaml;
 
@@ -39,7 +42,8 @@ pub(crate) const COMMAND_WORD: &str = "python";
 mod bindings {
     wit_bindgen::generate!({
         path: "wit",
-        world: "provider-cli",
+        world: "python-combined",
+        generate_all,
         pub_export_macro: true,
     });
 }
@@ -62,9 +66,9 @@ impl Provider for PythonProvider {
             capabilities: vec![ProviderCapability {
                 id: EVAL.parse().expect("static capability identifier"),
                 description: if cfg!(feature = "http") {
-                    "Evaluate a bounded script with json, re, yaml and dekopon_requests GET/HEAD under the host HTTP invocation grant; assign output to result"
+                    "Evaluate bounded Python with in-memory dekopon_tables SQL, dekopon_numeric, and broker-granted dekopon_requests GET/HEAD; assign output to result"
                 } else {
-                    "Evaluate a bounded Python 3 script with json, re, and constrained yaml; assign the safe JSON-shaped return value to result"
+                    "Evaluate bounded Python with in-memory dekopon_tables SQL and dekopon_numeric; assign the safe JSON-shaped return value to result"
                 }.to_owned(),
                 effect: EffectKind::ReadOnly,
                 risk: RiskLevel::High,
