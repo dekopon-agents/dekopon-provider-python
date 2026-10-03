@@ -71,7 +71,7 @@ fn deployed_crates_io_get_uses_authorized_http_in_real_component_and_native() {
 }
 
 #[test]
-fn no_http_handle_outside_invocation_and_no_reuse_in_next_invocation() {
+fn broker_denies_without_http_grant_and_next_invocation_remains_isolated() {
     std::thread::Builder::new()
         .stack_size(32 * 1024 * 1024)
         .spawn(|| {
@@ -79,8 +79,8 @@ fn no_http_handle_outside_invocation_and_no_reuse_in_next_invocation() {
             let first = native.call("python.eval", &program("https://crates.io").to_string());
             assert_eq!(first.status, 0, "{}", first.stderr);
             assert_eq!(result(&first.stdout)["ok"], true);
-            // A separate VM without a broker-granted HTTP response cannot use the prior invocation's
-            // handle; neither the module import nor the captured Python function gives ambient access.
+            // A separate VM cannot reuse the prior invocation's HTTP grant. The new invocation
+            // has its own handle, but without a broker grant its request is denied.
             let no_grant = Native::<PythonProvider>::new();
             let denied = no_grant.call("python.eval", &program("https://crates.io").to_string());
             assert_eq!(denied.status, 0, "{}", denied.stderr);
