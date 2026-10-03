@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Bring the in-memory `dekopon_tables` SQL and `dekopon_numeric` toolkit to the typed stdio Python provider, with broker-provided OS entropy and clocks for the DataFusion component. Keep the closed Python sandbox and existing invocation limits.
+
 ## [0.6.3] - 2026-10-03
 
 ### Changed

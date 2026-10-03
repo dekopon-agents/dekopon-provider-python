@@ -7,6 +7,8 @@ const ALLOWED_MODULES: &[&str] = &[
     "json",
     "re",
     "yaml",
+    "dekopon_numeric",
+    "dekopon_tables",
     #[cfg(feature = "http")]
     "dekopon_requests",
 ];
@@ -264,7 +266,7 @@ mod tests {
 
     #[test]
     fn allowlist_is_exact_and_closed() {
-        for allowed in ["json", "re", "yaml"] {
+        for allowed in ["json", "re", "yaml", "dekopon_numeric", "dekopon_tables"] {
             assert!(is_allowed_module(allowed), "{allowed}");
         }
         for denied in [

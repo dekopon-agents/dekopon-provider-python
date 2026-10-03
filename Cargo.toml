@@ -2,7 +2,7 @@
 
 [package]
 name = "dekopon-python-provider"
-version = "0.6.3"
+version = "0.7.0"
 edition = "2024"
 rust-version = "1.98.1"
 license = "MIT OR Apache-2.0"
@@ -19,7 +19,12 @@ http = []
 
 [dependencies]
 clap = { version = "=4.6.6", features = ["derive"] }
-dekopon-provider-sdk = "=0.31.0"
+dekopon-provider-sdk = { git = "https://github.com/dekopon-agents/dekopon.git", rev = "64870d1b1112f19c62dea5f88dabccad525d78d8" }
+datafusion = { git = "https://github.com/dekopon-agents/datafusion.git", rev = "cf3778098ad3ea283ecd8ee2a991be7d9a29750c", default-features = false, features = ["sql", "dekopon-wasm", "string_expressions", "datetime_expressions"] }
+ndarray = { version = "=0.17.2", default-features = false, features = ["std"] }
+statrs = { version = "=0.19.1", default-features = false, features = ["std"] }
+smartcore = { version = "=0.6.14", default-features = false }
+tokio = { version = "=1.52.4", default-features = false, features = ["rt"] }
 schemars = "=1.2.2"
 getrandom = "=0.3.4"
 num-traits = "=0.2.19"
@@ -32,11 +37,38 @@ serde_json = "=1.0.151"
 yaml-rust2 = { version = "=0.12.0", default-features = false }
 
 [dev-dependencies]
-dekopon-provider-sdk-testkit = "=0.31.0"
+dekopon-provider-sdk-testkit = { git = "https://github.com/dekopon-agents/dekopon.git", rev = "64870d1b1112f19c62dea5f88dabccad525d78d8" }
 tempfile = "=3.27.0"
-tokio = { version = "=1.49.0", default-features = false, features = ["macros", "rt-multi-thread", "sync"] }
+tokio = { version = "=1.52.4", default-features = false, features = ["macros", "rt-multi-thread", "sync"] }
 
 [patch.crates-io]
+datafusion-catalog = { git = "https://github.com/dekopon-agents/datafusion.git", rev = "cf3778098ad3ea283ecd8ee2a991be7d9a29750c" }
+datafusion-catalog-listing = { git = "https://github.com/dekopon-agents/datafusion.git", rev = "cf3778098ad3ea283ecd8ee2a991be7d9a29750c" }
+datafusion-common = { git = "https://github.com/dekopon-agents/datafusion.git", rev = "cf3778098ad3ea283ecd8ee2a991be7d9a29750c" }
+datafusion-common-runtime = { git = "https://github.com/dekopon-agents/datafusion.git", rev = "cf3778098ad3ea283ecd8ee2a991be7d9a29750c" }
+datafusion-datasource = { git = "https://github.com/dekopon-agents/datafusion.git", rev = "cf3778098ad3ea283ecd8ee2a991be7d9a29750c" }
+datafusion-datasource-arrow = { git = "https://github.com/dekopon-agents/datafusion.git", rev = "cf3778098ad3ea283ecd8ee2a991be7d9a29750c" }
+datafusion-datasource-csv = { git = "https://github.com/dekopon-agents/datafusion.git", rev = "cf3778098ad3ea283ecd8ee2a991be7d9a29750c" }
+datafusion-datasource-json = { git = "https://github.com/dekopon-agents/datafusion.git", rev = "cf3778098ad3ea283ecd8ee2a991be7d9a29750c" }
+datafusion-execution = { git = "https://github.com/dekopon-agents/datafusion.git", rev = "cf3778098ad3ea283ecd8ee2a991be7d9a29750c" }
+datafusion-expr = { git = "https://github.com/dekopon-agents/datafusion.git", rev = "cf3778098ad3ea283ecd8ee2a991be7d9a29750c" }
+datafusion-expr-common = { git = "https://github.com/dekopon-agents/datafusion.git", rev = "cf3778098ad3ea283ecd8ee2a991be7d9a29750c" }
+datafusion-functions = { git = "https://github.com/dekopon-agents/datafusion.git", rev = "cf3778098ad3ea283ecd8ee2a991be7d9a29750c" }
+datafusion-functions-aggregate = { git = "https://github.com/dekopon-agents/datafusion.git", rev = "cf3778098ad3ea283ecd8ee2a991be7d9a29750c" }
+datafusion-functions-aggregate-common = { git = "https://github.com/dekopon-agents/datafusion.git", rev = "cf3778098ad3ea283ecd8ee2a991be7d9a29750c" }
+datafusion-functions-nested = { git = "https://github.com/dekopon-agents/datafusion.git", rev = "cf3778098ad3ea283ecd8ee2a991be7d9a29750c" }
+datafusion-functions-table = { git = "https://github.com/dekopon-agents/datafusion.git", rev = "cf3778098ad3ea283ecd8ee2a991be7d9a29750c" }
+datafusion-functions-window = { git = "https://github.com/dekopon-agents/datafusion.git", rev = "cf3778098ad3ea283ecd8ee2a991be7d9a29750c" }
+datafusion-functions-window-common = { git = "https://github.com/dekopon-agents/datafusion.git", rev = "cf3778098ad3ea283ecd8ee2a991be7d9a29750c" }
+datafusion-optimizer = { git = "https://github.com/dekopon-agents/datafusion.git", rev = "cf3778098ad3ea283ecd8ee2a991be7d9a29750c" }
+datafusion-physical-expr = { git = "https://github.com/dekopon-agents/datafusion.git", rev = "cf3778098ad3ea283ecd8ee2a991be7d9a29750c" }
+datafusion-physical-expr-adapter = { git = "https://github.com/dekopon-agents/datafusion.git", rev = "cf3778098ad3ea283ecd8ee2a991be7d9a29750c" }
+datafusion-physical-expr-common = { git = "https://github.com/dekopon-agents/datafusion.git", rev = "cf3778098ad3ea283ecd8ee2a991be7d9a29750c" }
+datafusion-physical-optimizer = { git = "https://github.com/dekopon-agents/datafusion.git", rev = "cf3778098ad3ea283ecd8ee2a991be7d9a29750c" }
+datafusion-physical-plan = { git = "https://github.com/dekopon-agents/datafusion.git", rev = "cf3778098ad3ea283ecd8ee2a991be7d9a29750c" }
+datafusion-pruning = { git = "https://github.com/dekopon-agents/datafusion.git", rev = "cf3778098ad3ea283ecd8ee2a991be7d9a29750c" }
+datafusion-session = { git = "https://github.com/dekopon-agents/datafusion.git", rev = "cf3778098ad3ea283ecd8ee2a991be7d9a29750c" }
+datafusion-sql = { git = "https://github.com/dekopon-agents/datafusion.git", rev = "cf3778098ad3ea283ecd8ee2a991be7d9a29750c" }
 rustpython-derive-impl = { path = "patches/rustpython-derive-impl" }
 rustpython-vm = { path = "patches/rustpython-vm" }
 
@@ -54,6 +86,6 @@ unimplemented = "deny"
 [profile.release]
 codegen-units = 1
 lto = "fat"
-opt-level = 3
+opt-level = "s"
 panic = "abort"
 strip = "symbols"
