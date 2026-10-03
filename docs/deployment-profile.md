@@ -30,7 +30,7 @@ RustPython hash seed remains fixed independently.
 
 The release profile uses `opt-level = "s"`, fat LTO, one codegen unit, abort-on-panic and symbol
 stripping. This digest identifies the measured local component; publication verifies the build
-and checksum again. Core SDK/testkit are pinned to `0f93bcbbd1a2031f6693d06f66aa4ec012a01877`
+and checksum again. Core SDK/testkit are pinned to the published 0.32.0 crates
 and the DataFusion fork to `cf3778098ad3ea283ecd8ee2a991be7d9a29750c`.
 
 ## Broker profile and workload evidence

@@ -4,8 +4,7 @@ A WebAssembly component with broker-granted HTTP exposing one read-only, High-ri
 `python.eval`. It embeds **RustPython 0.5.0 exactly**, creates a fresh interpreter per call,
 captures bounded stdout in Rust, and returns only a bounded JSON-shaped result. A Dekopon shell
 reaches it through the `python` command word. Version 0.7.0 brings the combined SQL and numeric
-toolkit onto the v0.6.3 typed stdio SDK, pinned to core host-services revision `0f93bcbb` until
-the release re-pin. It exports `run-command` through the current provider world.
+toolkit onto the typed stdio SDK, pinned to the published Dekopon SDK 0.32.0. It exports `run-command` through the current provider world.
 
 > **Release status: owner-approved.** The owner accepted the exact LGPL dependencies for this
 > standalone optional provider; this records a project policy choice, not attorney review. LGPL is
