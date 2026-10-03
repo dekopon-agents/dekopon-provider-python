@@ -54,6 +54,16 @@ fn deployed_crates_io_get_uses_authorized_http_in_real_component_and_native() {
             assert_eq!(requests[0].method, "GET");
             assert_eq!(requests[0].uri, "https://crates.io/api/v1/crates/serde");
             assert!(requests[0].body.is_empty());
+            assert!(
+                requests[0]
+                    .headers
+                    .iter()
+                    .any(|header| header.name == "user-agent"
+                        && header.value
+                            == format!("dekopon-provider-python/{}", env!("CARGO_PKG_VERSION"))
+                                .as_bytes()),
+                "public APIs require the fixed User-Agent"
+            );
         })
         .unwrap()
         .join()
@@ -185,6 +195,32 @@ fn redirect_is_data_and_not_followed() {
     assert_eq!(output.status, 0, "{}", output.stderr);
     assert_eq!(result(&output.stdout)["result"], json!([302, true, 0]));
     assert_eq!(output.http_calls.len(), 1, "no redirect follow-up");
+}
+
+#[test]
+fn head_uses_only_the_granted_method_and_returns_no_body() {
+    let run = Harness::<PythonProvider>::get(component()).http(HttpScript::new(
+        "localhost",
+        "HEAD",
+        Response {
+            status: 200,
+            headers: vec![],
+            body: vec![],
+        },
+    ));
+    let origin = run.origin().expect("broker fixture").to_owned();
+    let output = run
+        .call(
+            "python.eval",
+            request_script(
+                &origin,
+                "r = requests.head(base + '/index')\nresult = [r.status_code, len(r.content)]",
+            ),
+        )
+        .expect("broker-authorized HEAD");
+    assert_eq!(output.status, 0, "{}", output.stderr);
+    assert_eq!(result(&output.stdout)["result"], json!([200, 0]));
+    assert_eq!(output.http_calls.len(), 1);
 }
 
 #[test]
