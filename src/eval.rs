@@ -89,14 +89,10 @@ pub(crate) fn interpreter() -> Interpreter {
         crate::capture::stdout_module::module_def(&builder.ctx),
         crate::capture::stderr_module::module_def(&builder.ctx),
         crate::policy::policy_module::module_def(&builder.ctx),
-        crate::numeric::numeric_module::module_def(&builder.ctx),
-        crate::tables::tables_module::module_def(&builder.ctx),
         crate::yaml::yaml_module::module_def(&builder.ctx),
     ]);
     #[cfg(feature = "http")]
     definitions.push(crate::requests::requests_module::module_def(&builder.ctx));
-    #[cfg(feature = "engine-swap")]
-    definitions.push(crate::engine::engine_module::module_def(&builder.ctx));
     builder
         .add_native_modules(&definitions)
         .add_frozen_modules(rustpython_pylib::FROZEN_STDLIB)
@@ -106,7 +102,7 @@ pub(crate) fn interpreter() -> Interpreter {
 fn execute(script: &str, vm: &VirtualMachine) -> Result<Value, ErrorDetail> {
     vm.recursion_limit.set(PYTHON_RECURSION);
     capture::install(vm).map_err(|error| python_error(error, vm, "runtime"))?;
-    policy::install(vm).map_err(|error| python_error(error, vm, "runtime"))?;
+    let _closed = policy::install(vm).map_err(|error| python_error(error, vm, "runtime"))?;
 
     let scope = vm.new_scope_with_builtins();
     scope

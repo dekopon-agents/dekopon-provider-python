@@ -1,14 +1,11 @@
 # Dekopon Python provider
 
 A WebAssembly component with broker-granted HTTP exposing one read-only, High-risk capability:
-`python.eval`. The **0.7.0-alpha.1 candidate** embeds RustPython 0.5.0, DataFusion
-55.1.0, ndarray 0.17.2, statrs 0.19.1 and SmartCore 0.6.14 in one component. It creates a fresh
-interpreter per call, captures bounded stdout, and returns only a bounded JSON-shaped result.
-The `python` command word remains pure. The candidate host/SDK dependency is core PR 354
-revision `820ee7a521201828ed42171f1ead5e75026595d2` (0.23.0); the DataFusion
-55.1.0 no-JS port is pinned to the public fork commit
-`cf3778098ad3ea283ecd8ee2a991be7d9a29750c`. The SDK/host remains unreleased;
-production brokers without the clock/random imports cannot run this component.
+`python.eval`. It embeds **RustPython 0.5.0 exactly**, creates a fresh interpreter per call,
+captures bounded stdout in Rust, and returns only a bounded JSON-shaped result. A Dekopon shell
+reaches it through the `python` command word. This prepublish 0.6.2 branch targets the typed
+stdio SDK at core commit `16c17e85`; the version bump to 0.6.3 follows core publication. It
+exports `run-command` through the current provider world, importing `dekopon:stdio/streams@0.1.0`.
 
 > **Release status: owner-approved.** The owner accepted the exact LGPL dependencies for this
 > standalone optional provider; this records a project policy choice, not attorney review. LGPL is
@@ -23,13 +20,9 @@ The supported release/OCI component is **`python-provider.wasm`**, exposing **`p
 and command word **`python`**. Cargo feature `http` is default-on and keeps Dekopon-specific
 HTTP code clearly separated; disabling defaults is a developer customization, not a supported
 CI or distribution variant. Ordinary Cargo builds include `dekopon_requests`.
-The combined component imports exactly `dekopon:http/client@1.1.0.send`,
-`dekopon:clock/monotonic@1.1.0.now-nanos`, `dekopon:clock/wall@1.1.0.now-unix-millis`, and
-`dekopon:random/source@0.1.0.get-random-bytes`. The latter three power SQL internals and
-getrandom 0.3; the VM hash seed remains deliberately fixed. There is no Python-visible time,
-random, filesystem, or socket API. A candidate broker host with these imports must load the
-component, even for pure scripts; HTTP is still invocation-granted. Bare empty-linker Wasmtime
-cannot instantiate it.
+The external imports are **`dekopon:stdio/streams@0.1.0`** and
+**`dekopon:http/client@1.2.0`**. A real broker must link them even for pure scripts, which
+succeed without HTTP grants. Bare empty-linker Wasmtime cannot instantiate the component.
 
 Configure the broker's route/constraint set for `python.eval` with an explicit `http` grant:
 `allowedHosts` (exact authorities, including effective nondefault port), `allowedMethods` (`GET`
@@ -74,39 +67,10 @@ The native facade is intentionally not the pip `requests` package:
 - Runtime output is the existing JSON `ok/stdout/stdoutTruncated/result` or error envelope, **not an
   OS exit status**. Stdout and result limits do not increase for HTTP.
 
-The shared workflow must reproduce the pinned combined candidate before alpha publication.
-Provider-owned `tests/component_contract.rs` checks the exact four-import authority and WIT shape.
-`tests/requests.rs` uses FakeBroker for no-grant denial and its real registry with published
-`AuthorizationGate`/HTTP constraints for the controlled-server tests. It does not test Cedar policy
-selection; it tests production host enforcement of preauthorized grants without a transport mock.
-
-## Combined in-memory alpha facade
-
-`dekopon_tables.query(sql, tables)` takes one SELECT query and a dict of named row-array tables
-(e.g. `{'people': [{'id': 1, 'group': 'a'}]}`). Each nonempty table has matching column keys in
-every row and homogeneous bool, signed integer, finite float or text columns; nulls are allowed
-with a non-null type witness. Names are short ASCII identifiers. It returns
-`{'columns': [...], 'rows': [[...], ...]}` of bounded JSON-safe values. Up to 4 tables, 8 columns
-per table, 256 input rows total, 128 KiB table JSON, 4 KiB SQL, 256 output rows, 16 result
-columns and 128 KiB result; output types outside the safe scalar/date projection are errors.
-DDL, DML, multi-statement SQL, COPY and external table scans are refused. The per-call DataFusion
-runtime has disk manager disabled, one query partition and an 8 MiB query memory pool (not a
-whole-process allocation ceiling). No table survives an invocation; no CSV/path/Parquet scans,
-persistent dataframe object, or binary export is exposed.
-
-`dekopon_numeric` provides `vector_add`, `dot`, `matrix_multiply`, `column_means`, `normal_cdf`,
-`linear_regression` (training-set predictions) and `kmeans` (training-set labels; explicit u64
-seed). Inputs are bounded exact list/tuple numeric arrays with finite values of magnitude <=1e6.
-See source constants for shape/work bounds; output is JSON-safe, not a NumPy/sklearn model.
-Neither module permits direct import of backend packages. The original result/stdout/HTTP ceilings
-and guarded import registry remain unchanged.
-
-This is an **alpha engine integration**, not the completed toolkit in external `SCOPE.md`:
-in-memory streams/collections/math/decimal/CSV/date parsing, URL/HTML/Unicode/fuzzy extraction,
-compression, general table construction/Arrow/Parquet/CSV bytes, chart/report generation,
-spreadsheet/PDF/NLP/chemistry/embedding/model workflows, asset input/output and notebook package
-API compatibility remain unimplemented. SQL wall time is statement-stable and does not introduce
-`datetime.now`. No Turso or path storage is included.
+The shared workflow builds and reproduces this one shipped HTTP component and generates its SBOM.
+Provider-owned `tests/component_contract.rs` checks the decoded stdio/HTTP imports and rejects
+WASI. `tests/requests.rs` uses testkit real-component, broker-authorized HTTPS fixtures and native
+execution to compare the deployed crates.io JSON GET. It does not test Cedar policy selection.
 
 ## Build
 
@@ -120,9 +84,8 @@ and component checks all run through the shared
 cargo fmt --all --check
 cargo clippy --locked --workspace --all-targets -- -D warnings
 cargo deny --all-features check bans licenses sources advisories
-# The supported shared CI builds, componentizes, verifies and reproduces the release artifact.
-# For local source validation use ordinary Cargo with the worktree's default target; do not
-# execute local build scripts that override compiler, wrapper or target settings.
+../provider-workflows/build.sh
+DEKOPON_PROVIDER_COMPONENT=$PWD/python-provider.wasm cargo test --locked --workspace
 ```
 
 `../provider-workflows/build.sh` is a sibling checkout of the shared workflows repository (see its
@@ -155,24 +118,25 @@ result = yaml.safe_load("retries: 2")
 EOF
 ```
 
-All three propose `python.eval` with exactly the [API](#api) input, `{"script": ...}`, and the
-broker authorizes and runs that proposal like a direct call. The guest parses the argv itself with
-the SDK's clap and constructs no VM to do it:
+`-c` proposes `{"script": CODE}`; bare and `-` propose `{"script":"","stdin_script":true}`.
+The broker authorizes the proposal before the capability reads the script from stdin (at most
+65,537 bytes read). The guest parses argv with clap and constructs no VM during proposal:
 
 | argv | Answer |
 |---|---|
 | `--help`, `-h`, `--version`, `-V` | rendered on stdout, status 0 |
-| `-c CODE` | proposes `{"script": CODE}`; a piped value is ignored |
-| `-` with a piped value | proposes `{"script": <piped value>}` |
+| `-c CODE` | proposes `{"script": CODE}`; piped stdin remains program data |
+| `-` with piped input | proposes an invoke-time stdin-script marker |
 | `-` with nothing piped | declined: `python -: nothing was piped in`, a usage error at status 2 |
-| nothing, with a non-empty piped value | proposes `{"script": <piped value>}`, identical to `-` |
-| nothing, with nothing piped or an empty pipe | clap's usage error on stderr, status 2 |
+| nothing, with piped input | proposes the same invoke-time marker as `-` |
+| nothing, with nothing piped | declined usage error, status 2 |
 | `-c` with `-`, a file name, extra arguments | clap's usage error on stderr, status 2 |
 
 There is no `python FILE` and no `sys.argv`: the component has no filesystem and the capability
-takes only a script, named by `-c`, `-`, or nothing at all when something non-empty is piped
+takes only a script, named by `-c`, `-`, or nothing at all when stdin is piped
 in — `python <<'EOF' … EOF` matches CPython's own read of a non-tty stdin when given no file.
-`src/commands.rs` pins the help page byte for byte.
+The script reader bounds bytes and validates UTF-8 only after authorization; `-c` retains stdin
+as program data rather than interpreting it as script.
 
 ## Running it
 
@@ -183,26 +147,12 @@ resource and HTTP-grant suites all exercise the same shipped component:
 DEKOPON_PROVIDER_COMPONENT=$PWD/python-provider.wasm cargo test --locked --test broker --test requests
 ```
 
-`dekopon-provider-sdk-testkit`'s `FakeBroker` provides that host, including fuel, deadline,
-and memory limits. For example, a pure script needs no HTTP grant:
+`dekopon-provider-sdk-testkit::Harness` provides the real component host (including fuel,
+deadline and memory limits). For example, a pure script needs no HTTP grant:
 
 ```rust
-let broker = FakeBroker::builder()
-    .component("python-provider.wasm")
-    .provider("python")
-    .host_limits(BrokerHostLimits {
-        max_memory_bytes: 64 * 1024 * 1024,
-        fuel: 1_000_000_000,
-        max_timeout: Duration::from_secs(5),
-        ..BrokerHostLimits::default()
-    })
-    .timeout_ms(5_000)
-    .max_output_bytes(786_432)
-    .build()
-    .await?;
-let output = broker
-    .invoke("python.eval", json!({"script": "result = sum(i * i for i in range(5))"}))
-    .await?;
+let output = Harness::<PythonProvider>::get("python-provider.wasm")
+    .call("python.eval", json!({"script": "result = sum(i * i for i in range(5))"}))?;
 ```
 
 Expected capability output:
@@ -228,8 +178,9 @@ Input is exactly:
 {"script": "Python 3 source"}
 ```
 
-`script` is required, must be a string, and is limited to 65,536 UTF-8 bytes. Unknown fields are
-rejected before constructing a VM. Source executes as `Mode::Exec`; assign the desired return value
+`script` is required, must be a string, and is limited to 65,536 UTF-8 bytes. The optional
+`stdin_script` boolean is reserved for CLI proposals; when true, `script` must be empty and stdin
+is read during the authorized invocation. Unknown fields are rejected before constructing a VM. Source executes as `Mode::Exec`; assign the desired return value
 to `result` (predeclared as `None`).
 
 Success data is exactly:
@@ -293,7 +244,7 @@ stdlib/package compatibility, pip, or persistence.
 
 ## Denied authority and determinism
 
-The exact component contract allows only Dekopon HTTP. There is no WASI, JS/browser, host
+The exact component contract allows only Dekopon stdio and HTTP. There is no WASI, JS/browser, host
 environment, filesystem, raw socket, storage, clock, entropy, subprocess, dynamic loading, or
 generic provider dispatch. Imports including `sys`, `os`, `time`, `random`, `secrets`, `socket`,
 `ssl`, `sqlite3`, `subprocess`, `threading`, `ctypes`, `tkinter`, and `webbrowser` are denied.
@@ -315,7 +266,7 @@ lookup, proposal submission, shell commands, persistence, or privileged imports.
 Formatting, clippy, `cargo deny`, the reproducible component build, and the test suite are all
 gated by the shared `ci / validate` workflow rather than local scripts; see [Build](#build) for
 the local build and test commands. Component tests require `DEKOPON_PROVIDER_COMPONENT` and fail
-when it is unset; their contract fixtures also require `python3` and the pinned `wasm-tools`.
+when it is unset; their contract assertions require `python3` and the pinned `wasm-tools`.
 
 ## License and corresponding source
 

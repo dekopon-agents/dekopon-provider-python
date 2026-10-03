@@ -1,14 +1,8 @@
-# Deployment profile (historical 0.6.2; combined alpha is not deployed)
+# Deployment profile
 
-The prior 64 MiB/1B fuel/5 s immediate profile below runs pure Python/HTTP tests on the
-combined component, but **SQL/ML at this limit and RPi performance are not proven**. Combined
-SQL/numeric broker-host tests use a configured 256 MiB per memory, 8B fuel, 30 s maximum and
-786,432 output bytes; the host's separate artifact-file ceiling is 67,108,864 bytes. Neither
-artifact bytes nor configured linear-memory limit measure process RSS. SQL's 8 MiB query pool
-does not bound all Arrow/RustPython allocations. DataFusion is pinned to immutable public commit
-`cf3778098ad3ea283ecd8ee2a991be7d9a29750c`, and core host/SDK to unreleased
-`820ee7a521201828ed42171f1ead5e75026595d2`; no production broker deploy is implied.
-Revalidate source/lock/build reproducibility, policy and limits before any deployment.
+This profile separates guest-enforced data bounds from host-enforced execution termination. It is
+for the exact locked Rust 1.98.1 / wasm-tools 1.259.0 artifact and must be regenerated after a
+source, lockfile, compiler, or componentizer change.
 
 ## Selected host settings
 
@@ -41,8 +35,8 @@ size, digest, table declarations or memory minimum as measurements of this build
 CI review artifact contains the current size/digest record. Bytes are reproducible per platform,
 not promised identical across macOS and Linux.
 
-The combined contract gate enforces exactly four raw core imports: broker-granted
-`dekopon:http/client@1.1.0.send`, invocation-only monotonic/wall clock and random source. `tests/broker.rs` asserts 10M/50M fuel failures and normal operation
+The contract gate enforces one external interface (`dekopon:http/client@1.0.0`) and one raw core
+function import (`send`). `tests/broker.rs` asserts 10M/50M fuel failures and normal operation
 at 1G fuel and 64 MiB; `tests/requests.rs` exercises real multi-request grants on the same artifact.
 Pure scripts require no HTTP grant, but all invocations require HTTP linking by the broker.
 

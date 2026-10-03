@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-10-03
+
+### Changed
+
+- Migrate the deployed 0.6 Python provider to the published Dekopon SDK 0.31.0 typed stdio and broker-granted HTTP interfaces. Keep `python.eval`, `python -c`, and piped script input with the existing sandbox and HTTP authority.
+- Scope RustPython introspection restrictions to each invocation so later evaluations start with an intact interpreter type state.
+
 ## [0.6.2] - 2026-09-25
 
 ### Fixed

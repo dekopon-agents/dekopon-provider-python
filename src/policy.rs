@@ -1,15 +1,14 @@
-use rustpython_vm::{AsObject, PyResult, TryFromObject, VirtualMachine, builtins::PyDictRef};
+use rustpython_vm::{
+    AsObject, Py, PyObjectRef, PyResult, TryFromObject, VirtualMachine,
+    builtins::{PyDictRef, PyStrInterned, PyType},
+};
 
 const ALLOWED_MODULES: &[&str] = &[
     "json",
     "re",
     "yaml",
-    "dekopon_numeric",
-    "dekopon_tables",
     #[cfg(feature = "http")]
     "dekopon_requests",
-    #[cfg(feature = "engine-swap")]
-    "dekopon_engine",
 ];
 const REMOVED_BUILTINS: [&str; 6] = ["open", "input", "breakpoint", "compile", "eval", "exec"];
 const DENIED_MODULES: [&str; 15] = [
@@ -142,7 +141,30 @@ pub(crate) mod policy_module {
     }
 }
 
-pub(crate) fn install(vm: &VirtualMachine) -> PyResult<()> {
+/// `type` lives in RustPython's per-thread genesis context, shared by every interpreter on the
+/// thread (in wasm, the whole instance). Closing `type.__subclasses__` is scoped to one
+/// evaluation: dropping this puts it back, so the next interpreter initializes from a pristine
+/// `type` instead of failing in frozen `abc` code.
+#[must_use]
+pub(crate) struct ClosedIntrospection {
+    type_type: &'static Py<PyType>,
+    name: &'static PyStrInterned,
+    subclasses: Option<PyObjectRef>,
+}
+
+impl Drop for ClosedIntrospection {
+    fn drop(&mut self) {
+        if let Some(subclasses) = self.subclasses.take() {
+            self.type_type
+                .attributes
+                .write()
+                .insert(self.name, subclasses);
+            self.type_type.modified();
+        }
+    }
+}
+
+pub(crate) fn install(vm: &VirtualMachine) -> PyResult<ClosedIntrospection> {
     // Resolve the complete frozen/native dependency closure while the VM still has its pristine
     // internal import machinery. Guest imports never execute that machinery.
     let public_modules = ALLOWED_MODULES
@@ -205,13 +227,14 @@ pub(crate) fn install(vm: &VirtualMachine) -> PyResult<()> {
     // 0.5.0 enumeration can itself panic on internal static types). It is not part of python.eval's
     // supported surface, so remove the Python-visible traversal after trusted initialization.
     let type_type = vm.ctx.types.type_type;
+    let name = vm.ctx.intern_str("__subclasses__");
     type_type.modified();
-    if type_type
-        .attributes
-        .write()
-        .shift_remove(vm.ctx.intern_str("__subclasses__"))
-        .is_none()
-    {
+    let closed = ClosedIntrospection {
+        type_type,
+        name,
+        subclasses: type_type.attributes.write().shift_remove(name),
+    };
+    if closed.subclasses.is_none() {
         return Err(vm.new_runtime_error("failed to close type introspection"));
     }
 
@@ -228,7 +251,7 @@ pub(crate) fn install(vm: &VirtualMachine) -> PyResult<()> {
         public_registry.set_item(name, module, vm)?;
     }
     vm.sys_module.set_attr("modules", public_registry, vm)?;
-    Ok(())
+    Ok(closed)
 }
 
 pub(crate) fn is_allowed_module(name: &str) -> bool {
@@ -241,7 +264,7 @@ mod tests {
 
     #[test]
     fn allowlist_is_exact_and_closed() {
-        for allowed in ["json", "re", "yaml", "dekopon_numeric", "dekopon_tables"] {
+        for allowed in ["json", "re", "yaml"] {
             assert!(is_allowed_module(allowed), "{allowed}");
         }
         for denied in [
