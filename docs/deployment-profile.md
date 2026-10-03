@@ -1,67 +1,73 @@
-# Deployment profile
+# Deployment profile — v0.7.0 combined toolkit
 
-This profile separates guest-enforced data bounds from host-enforced execution termination. It is
-for the exact locked Rust 1.98.1 / wasm-tools 1.259.0 artifact and must be regenerated after a
-source, lockfile, compiler, or componentizer change.
+The provider combines a fresh RustPython interpreter, in-memory DataFusion SQL and bounded
+numeric functions. It has not been deployed to the Pi. The broker's configured limits and
+measured component properties below are different kinds of evidence: an artifact file size is not
+a linear-memory bound, and a per-memory cap is not a container-RSS or aggregate-admission cap.
 
-## Selected host settings
+## Decoded import contract and artifact
 
-| Setting | Selected value | Owner |
-|---|---:|---|
-| per-memory maximum | 67,108,864 bytes | broker `hostLimits` |
-| memories / tables / instances | 4 / 16 / 64 | broker `hostLimits` defaults |
-| table elements | 100,000 | broker `hostLimits` default |
-| invocation input ceiling | 1,048,576 bytes | broker `hostLimits` |
-| manifest/output host ceiling | 1,048,576 bytes | broker `hostLimits` |
-| dedicated fuel | 1,000,000,000 | broker `hostLimits` (global) |
-| global timeout ceiling | 30,000 ms | broker `hostLimits` |
-| capability timeout | 5,000 ms | authorization constraint |
-| capability output | 786,432 bytes | authorization constraint |
-| HTTP | narrow invocation grant; absent denies requests | real broker HTTP linker |
-| storage | none | no storage import |
+`wasm-tools component wit python-provider.wasm` decodes exactly these imports:
 
-The broker's default 2 MiB frame exceeds the required output-plus-64-KiB margin; the protocol hard
-maximum is 16 MiB. `hostLimits` is all-or-nothing global configuration. Per-capability policy may
-narrow timeout/output/HTTP/storage, but not memory or fuel.
+| Interface | Use |
+|---|---|
+| `dekopon:stdio/streams@0.1.0` | typed stdin/stdout |
+| `dekopon:http/client@1.2.0` | authorized `dekopon_requests` GET/HEAD |
+| `dekopon:clock/wall@1.1.0` | DataFusion raw wall-clock import |
+| `dekopon:clock/monotonic@1.1.0` | DataFusion raw monotonic import |
+| `dekopon:random/source@0.1.0` | invocation-scoped SDK OS entropy |
 
-`tests/broker.rs` drives the real broker host at 1,000,000,000 fuel, 5,000 ms, 64 MiB per memory,
-and 786,432 output bytes. The immediate host's 10,000,000-fuel default, and 50,000,000, are
-intentionally asserted as safe failures and are not working profiles for RustPython startup.
+No WASI, storage, filesystem, process or socket import is present. The clocks are declared
+because DataFusion imports them; the provider does not call their handles. The custom getrandom
+backend holds the random handle only while `python.eval` runs and has no fallback source. The
+RustPython hash seed remains fixed independently.
 
-## Measured artifact
+| Exact shared-build artifact | Value |
+|---|---:|
+| Size | 49,349,203 bytes (47.063 MiB) |
+| SHA-256 | `ca63a6e178a0334833cb0f3c64fa5ac6494608bc5aaccdc70c6e23f26788ea05` |
+| Artifact ceiling | 67,108,864 bytes (64 MiB); passes |
 
-The full HTTP component replaces the earlier v0.4.0 zero-import artifact. Do not reuse its
-size, digest, table declarations or memory minimum as measurements of this build. The exact-head
-CI review artifact contains the current size/digest record. Bytes are reproducible per platform,
-not promised identical across macOS and Linux.
+The release profile uses `opt-level = "s"`, fat LTO, one codegen unit, abort-on-panic and symbol
+stripping. This digest identifies the measured local component; publication verifies the build
+and checksum again. Core SDK/testkit are pinned to the published 0.32.0 crates
+and the DataFusion fork to `cf3778098ad3ea283ecd8ee2a991be7d9a29750c`.
 
-The contract gate enforces one external interface (`dekopon:http/client@1.0.0`) and one raw core
-function import (`send`). `tests/broker.rs` asserts 10M/50M fuel failures and normal operation
-at 1G fuel and 64 MiB; `tests/requests.rs` exercises real multi-request grants on the same artifact.
-Pure scripts require no HTTP grant, but all invocations require HTTP linking by the broker.
+## Broker profile and workload evidence
 
-The shared CI log records the component size, imports and checksum; the uploaded component and
-checksum sidecar identify the exact build. The fuel bracket is asserted by `tests/broker.rs`.
+The Pi's `broker.d/host.yaml` sets 24,000,000,000 fuel, 300,000 ms maximum timeout and
+12,582,912-byte input/output ceilings. It leaves the per-memory limit at the broker's default
+67,108,864 bytes and sets aggregate `maxTotalMemoryBytes` to 268,435,456 bytes. Per-capability
+HTTP constraints still authorize individual requests; pure scripts need no HTTP grant. The
+in-memory SQL session disables disk spill, uses an explicit 8 MiB query pool, and accepts only one
+SELECT over supplied tables; this pool does not include all Arrow and RustPython allocations.
+
+The ignored `tests/profile.rs` workload test uses the real typed broker testkit at precisely those
+fuel, timeout and I/O ceilings, first with 64 MiB per memory and, only upon failure, 128 MiB.
+Both workloads construct a fresh interpreter: a supplied-table join/group/window SQL query and a
+numeric batch with ndarray, statrs and SmartCore operations. Run with:
+
+```console
+DEKOPON_PROVIDER_COMPONENT=$PWD/python-provider.wasm cargo test -p dekopon-python-provider --locked --test profile -- --ignored --nocapture
+```
+
+| Workload | 64 MiB per memory | 128 MiB if needed |
+|---|---|---|
+| Join/group/window SQL | PASS | Not needed |
+| Numeric batch | PASS | Not needed |
+
+Both workloads passed at 64 MiB; 128 MiB was not run because the fallback condition did not
+occur. These outcomes inform the owner's homelab limit decision; they do not change the Pi's
+configuration or cut the toolkit. Host fuel, epoch deadline and memory traps remain host errors,
+not guest JSON failures. The legacy v0.6.3 suites still cover small scripts, HTTP grants, sandbox
+restrictions, fuel and deadline refusal under their own test settings.
 
 ## Admission and process memory
 
-A 64 MiB limit applies to each linear memory, not process RSS. `maxTotalMemoryBytes` defaults to
-absent and reserves one `maxMemoryBytes` unit per live store; it does not account for four memories,
-compiled code, Cranelift/component compilation, or host allocations. Compilation is also outside
-fuel and invocation deadlines.
-
-A single cold compiler process was measured at up to roughly 591 MB RSS on the v0.1.0 build, when
-a command-line host still existed to measure it under `/usr/bin/time`. That historical figure is not a measurement or bound for the current HTTP component. Until platform-specific RSS and
-concurrency load tests establish a tighter number, budget at least
-**768 MiB plus admitted concurrent guest reservations** for one compiler/connection profile; do
-not derive a container limit from the 64 MiB store ceiling alone.
-
-1. admit only the trusted component digest;
-2. use a persistent broker-owned Wasmtime compilation cache;
-3. set `maxTotalMemoryBytes` to `maxConnections × 67,108,864` or lower;
-4. size the container above measured compiled-artifact RSS plus that admitted guest reservation;
-5. keep connection count low enough that concurrent cold compilation cannot OOM the process.
-
-RPi latency and aggregate concurrency are deployment measurements, not inferred from the Mac
-measurement. The owner has accepted the LGPL distribution decision; RPi measurements do not
-reopen it or hold publication. They remain a separate production-deployment/admission gate.
+A per-memory 64 MiB cap applies separately to each Wasm linear memory. Compiled component code,
+Cranelift, host allocations and multiple memories contribute to process RSS independently.
+`maxTotalMemoryBytes` reserves guest memory across admitted stores; it is not an RSS ceiling. The
+historical ~591 MB cold-compiler RSS observation was for the v0.1.0 build, not this component; do
+not use it as a current measurement or derive a container limit from the artifact size. Pi RSS,
+concurrency and cold-compile latency require deployment-specific measurement before changing
+admission or container memory. No homelab change is made by this PR.

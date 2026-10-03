@@ -5,14 +5,17 @@ mod entropy;
 mod eval;
 mod exception;
 mod limits;
+mod numeric;
 mod policy;
 #[cfg(feature = "http")]
 mod requests;
+mod tables;
 mod value;
 mod yaml;
 
 use dekopon_provider_sdk::provider::{
-    self, Capability, Code, Failure, Http, Proposal, Provider, Stdout, Usage,
+    self, Capability, Clock, Code, Failure, Http, Monotonic, Proposal, Provider, Random, Stdout,
+    Usage,
 };
 use dekopon_provider_sdk::{EffectKind, RiskLevel};
 use schemars::JsonSchema;
@@ -81,14 +84,18 @@ impl Provider for PythonProvider {
 impl Capability for Eval {
     type Provider = PythonProvider;
     const NAME: &'static str = "eval";
-    const DESCRIPTION: &'static str = "Evaluate a bounded script with json, re, yaml and broker-granted dekopon_requests GET/HEAD; assign output to result";
+    const DESCRIPTION: &'static str = "Evaluate bounded Python with in-memory dekopon_tables SQL, dekopon_numeric, and broker-granted dekopon_requests GET/HEAD; assign output to result";
     const EFFECT: EffectKind = EffectKind::ReadOnly;
     const RISK: RiskLevel = RiskLevel::High;
     type Input = EvalInput;
-    type Needs = Http;
+    type Needs = (Http, Clock, Monotonic, Random);
     type Error = PythonError;
 
-    fn run(mut input: Self::Input, http: Http, out: &mut Stdout) -> Result<(), Self::Error> {
+    fn run(
+        mut input: Self::Input,
+        (http, _clock, _monotonic, random): Self::Needs,
+        out: &mut Stdout,
+    ) -> Result<(), Self::Error> {
         if input.stdin_script {
             // Marker is proposal data, never pre-authorization script data.
             if !input.script.is_empty() {
@@ -118,6 +125,7 @@ impl Capability for Eval {
                 format!("script exceeds {SCRIPT_BYTES} UTF-8 bytes"),
             ));
         }
+        let _entropy = entropy::EntropyScope::install(random);
         #[cfg(feature = "http")]
         let result = requests::with_http(http, || eval::evaluate(&input.script));
         #[cfg(not(feature = "http"))]

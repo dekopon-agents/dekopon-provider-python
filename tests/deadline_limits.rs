@@ -1,5 +1,5 @@
 //! Host deadline terminates adversarial Python work; one registry compile in this test binary.
-use dekopon_provider_sdk_testkit::{BrokerHostLimits, Harness};
+use dekopon_provider_sdk_testkit::{BrokerHostLimits, Harness, HarnessError};
 use dekopon_python_provider::PythonProvider;
 use serde_json::json;
 use std::{
@@ -20,12 +20,18 @@ fn infinite_loop_and_backtracking_regex_cannot_outlive_host_deadline() {
         max_timeout: Duration::from_millis(250),
         ..BrokerHostLimits::default()
     };
-    // Registry compilation is outside invocation fuel/deadline; warm it before wall timing.
-    let warm = Harness::<PythonProvider>::get(component())
+    // Registry compilation is outside invocation fuel/deadline; warm it before wall timing. The
+    // registry cache is keyed by these limits, so the warm-up shares the 250 ms deadline, which
+    // interpreter init alone can exceed on a slow runner; only the compiled registry matters here.
+    match Harness::<PythonProvider>::get(component())
         .host_limits(limits.clone())
         .call("python.eval", json!({"script":"result = 0"}))
-        .expect("warm registry");
-    assert_eq!(warm.status, 0, "{warm:?}");
+    {
+        Ok(warm) => assert_eq!(warm.status, 0, "{warm:?}"),
+        Err(HarnessError::Invocation(failure))
+            if format!("{:?}", failure.error).starts_with("Timeout {") => {}
+        Err(error) => panic!("warm registry: {error:?}"),
+    }
     for script in [
         "while True:\n    pass",
         "import re\nresult = bool(re.search('(a+)+$', 'a' * 20000 + '!'))",
