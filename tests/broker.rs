@@ -113,3 +113,31 @@ fn sandbox_remains_fresh_and_denies_effectful_builtins() {
         }
     }
 }
+
+#[test]
+fn repeated_evaluations_on_one_thread_close_guest_introspection_without_poisoning_next_vm() {
+    std::thread::Builder::new()
+        .stack_size(32 * 1024 * 1024)
+        .spawn(|| {
+            let first = Native::<PythonProvider>::new()
+                .call("python.eval", &json!({"script": "result = 41"}).to_string());
+            assert_eq!(first.status, 0, "{}", first.stderr);
+            assert_eq!(answer(&first.stdout)["result"], 41);
+            let attack = Native::<PythonProvider>::new().call(
+                "python.eval",
+                &json!({"script": "object.__subclasses__()"}).to_string(),
+            );
+            assert_eq!(attack.status, 0, "{}", attack.stderr);
+            assert_eq!(answer(&attack.stdout)["ok"], false);
+            assert_eq!(answer(&attack.stdout)["error"]["type"], "AttributeError");
+            let healthy = Native::<PythonProvider>::new().call(
+                "python.eval",
+                &json!({"script": "import json\nresult = json.loads('[42]')"}).to_string(),
+            );
+            assert_eq!(healthy.status, 0, "{}", healthy.stderr);
+            assert_eq!(answer(&healthy.stdout)["result"], json!([42]));
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
