@@ -160,9 +160,9 @@ mod tests {
                 assert_eq!(result["error"]["message"], "http not granted");
                 let native = dekopon_provider_sdk_testkit::Native::<crate::PythonProvider>::new()
                     .http(dekopon_provider_sdk_testkit::HttpScript::new("crates.io", "GET", dekopon_provider_sdk::provider::Response { status: 200, headers: vec![], body: b"ok".to_vec() }));
-                let first = native.call("python.eval", &serde_json::json!({"script":"import dekopon_requests as r\nresult = r.get('https://crates.io/').text"}).to_string());
+                let first = native.call("python.eval", &serde_json::json!({"script":"import dekopon_requests as r\nresult = r.get('https://crates.io/').status_code"}).to_string());
                 assert_eq!(first.status, 0, "{}", first.stderr);
-                assert_eq!(serde_json::from_slice::<serde_json::Value>(&first.stdout).unwrap()["result"], "ok");
+                assert_eq!(serde_json::from_slice::<serde_json::Value>(&first.stdout).unwrap()["result"], 200, "{:?}", first.stdout);
                 let pure = dekopon_provider_sdk_testkit::Native::<crate::PythonProvider>::new()
                     .call("python.eval", &serde_json::json!({"script":"result = 1"}).to_string());
                 assert_eq!(pure.status, 0, "{}", pure.stderr);
