@@ -37,9 +37,7 @@ unsafe extern "Rust" fn __getrandom_v03_custom(
             return Ok(());
         }
         let mut bytes = vec![0; length];
-        random
-            .fill(&mut bytes)
-            .map_err(|_| getrandom::Error::UNEXPECTED)?;
+        random.fill(&mut bytes);
         // SAFETY: getrandom supplies a writable region of `length` bytes; the initialized
         // temporary owns precisely that many bytes and a null pointer is used only for zero.
         unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), destination, length) };

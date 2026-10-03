@@ -19,9 +19,9 @@ These names are illustrative. The core would know a stable module-bridge protoco
 
 ## What the experiment already establishes
 
-The default-off `engine-swap` experiment composes one unchanged prebuilt Python component with either of two separately compiled toy library components. The resulting provider components run through the existing SDK broker host without new host bindings. Both expose the normal provider interface and retain only the existing HTTP interface as an external import.
+The historical alpha.1 `engine-swap` experiment (preserved on `alpha/0.7`, not shipped in v0.7.0) composed one prebuilt Python component with either of two toy library components. It tested component calls, resource lifetime, fuel exhaustion, and allocation failure, not a data-analysis API.
 
-The current Python component is **not ignorant of its library interface**: it contains a handwritten native `dekopon_engine` module that calls generated bindings for `dekopon:engine/api@0.1.0`. Its functions test component calls, resource lifetime, fuel exhaustion, and memory-allocation failure; they are not a data-analysis API. Adding new Python-facing operations still requires changing that adapter.
+The shipped combined component instead compiles `dekopon_tables` and `dekopon_numeric` directly into RustPython. Adding new Python-facing operations still requires changing and rebuilding their native adapters. It imports broker stdio, HTTP, two clocks and OS entropy, not an engine-swap interface.
 
 A Wasm component is a binary containing typed imports/exports and potentially nested modules/components. WIT describes interfaces; it is not executable module-registration code. Composition connects a component's imports to another component's exports. Wasmtime instantiates the internal graph before the broker invokes the outer provider; Python calls already-connected functionality as needed.
 

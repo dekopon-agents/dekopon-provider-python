@@ -2,7 +2,7 @@
 use std::{path::PathBuf, process::Command};
 
 #[test]
-fn component_has_exact_http_only_authority() {
+fn component_has_exact_combined_toolkit_authority() {
     let component = std::env::var_os("DEKOPON_PROVIDER_COMPONENT")
         .expect("DEKOPON_PROVIDER_COMPONENT must point at the built component");
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -15,8 +15,6 @@ fn component_has_exact_http_only_authority() {
         status.success(),
         "component authority or WIT contract drift"
     );
-
-    // The decoded external component contract is the broker-linkable authority boundary.
 }
 
 #[test]

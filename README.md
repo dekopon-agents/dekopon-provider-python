@@ -3,9 +3,9 @@
 A WebAssembly component with broker-granted HTTP exposing one read-only, High-risk capability:
 `python.eval`. It embeds **RustPython 0.5.0 exactly**, creates a fresh interpreter per call,
 captures bounded stdout in Rust, and returns only a bounded JSON-shaped result. A Dekopon shell
-reaches it through the `python` command word. This prepublish 0.6.2 branch targets the typed
-stdio SDK at core commit `16c17e85`; the version bump to 0.6.3 follows core publication. It
-exports `run-command` through the current provider world, importing `dekopon:stdio/streams@0.1.0`.
+reaches it through the `python` command word. Version 0.7.0 brings the combined SQL and numeric
+toolkit onto the v0.6.3 typed stdio SDK, pinned to core host-services revision `0f93bcbb` until
+the release re-pin. It exports `run-command` through the current provider world.
 
 > **Release status: owner-approved.** The owner accepted the exact LGPL dependencies for this
 > standalone optional provider; this records a project policy choice, not attorney review. LGPL is
@@ -20,9 +20,12 @@ The supported release/OCI component is **`python-provider.wasm`**, exposing **`p
 and command word **`python`**. Cargo feature `http` is default-on and keeps Dekopon-specific
 HTTP code clearly separated; disabling defaults is a developer customization, not a supported
 CI or distribution variant. Ordinary Cargo builds include `dekopon_requests`.
-The external imports are **`dekopon:stdio/streams@0.1.0`** and
-**`dekopon:http/client@1.2.0`**. A real broker must link them even for pure scripts, which
-succeed without HTTP grants. Bare empty-linker Wasmtime cannot instantiate the component.
+The component imports exactly `dekopon:stdio/streams@0.1.0`,
+`dekopon:http/client@1.2.0`, `dekopon:clock/wall@1.1.0`,
+`dekopon:clock/monotonic@1.1.0`, and `dekopon:random/source@0.1.0`.
+The broker must link all five even for pure scripts, which succeed without HTTP grants.
+DataFusion's raw clock imports account for both clocks; SQL's native entropy uses the SDK's
+invocation-scoped random handle. Bare empty-linker Wasmtime cannot instantiate the component.
 
 Configure the broker's route/constraint set for `python.eval` with an explicit `http` grant:
 `allowedHosts` (exact authorities, including effective nondefault port), `allowedMethods` (`GET`
@@ -67,9 +70,8 @@ The native facade is intentionally not the pip `requests` package:
 - Runtime output is the existing JSON `ok/stdout/stdoutTruncated/result` or error envelope, **not an
   OS exit status**. Stdout and result limits do not increase for HTTP.
 
-The shared workflow builds and reproduces this one shipped HTTP component and generates its SBOM.
-Provider-owned `tests/component_contract.rs` checks the decoded stdio/HTTP imports and rejects
-WASI. `tests/requests.rs` uses testkit real-component, broker-authorized HTTPS fixtures and native
+The shared workflow builds and reproduces this one combined component and generates its SBOM.
+Provider-owned `tests/component_contract.rs` checks the decoded imports and rejects WASI. `tests/requests.rs` uses testkit real-component, broker-authorized HTTPS fixtures and native
 execution to compare the deployed crates.io JSON GET. It does not test Cedar policy selection.
 
 ## Build
@@ -220,7 +222,24 @@ submodules such as `re._parser` and `json.decoder` are denied:
 - `re` — RustPython's Python regular-expression module / `_sre` implementation;
 - `yaml` — this provider's native constrained facade with exactly `safe_load(str)`,
   `safe_dump(safe_value)`, and `YAMLError`;
-- `dekopon_requests` — bounded GET/HEAD under the invocation HTTP grant described above.
+- `dekopon_requests` — bounded GET/HEAD under the invocation HTTP grant described above;
+- `dekopon_tables` — `query(sql, tables)` for one query-only SELECT over at most four supplied
+  in-memory tables (256 input rows total, eight columns per table). At most 256 rows and 16 columns
+  are projected; disk spill is disabled, the query pool is 8 MiB, and external sources, COPY,
+  DDL and DML are refused;
+- `dekopon_numeric` — bounded `vector_add`, `dot`, `matrix_multiply`, `column_means`,
+  `normal_cdf`, `linear_regression`, and seeded `kmeans`. Exact lists/tuples of finite numbers
+  are required; vectors have at most 4096 elements, matrices at most 64 × 64 and ML input at most
+  128 rows × 8 features. The seed is explicit, not ambient entropy.
+
+```python
+import dekopon_tables as tables
+import dekopon_numeric as numeric
+
+rows = tables.query("SELECT grp, SUM(score) AS total FROM scores GROUP BY grp",
+                    {"scores": [{"grp": "a", "score": 2}, {"grp": "a", "score": 3}]})
+result = {"rows": rows["rows"], "dot": numeric.dot([2., 3.], [4., 5.])}
+```
 
 Example:
 
@@ -244,21 +263,22 @@ stdlib/package compatibility, pip, or persistence.
 
 ## Denied authority and determinism
 
-The exact component contract allows only Dekopon stdio and HTTP. There is no WASI, JS/browser, host
-environment, filesystem, raw socket, storage, clock, entropy, subprocess, dynamic loading, or
-generic provider dispatch. Imports including `sys`, `os`, `time`, `random`, `secrets`, `socket`,
+The exact component contract allows only Dekopon stdio, HTTP, wall and monotonic clocks, and
+OS entropy. There is no WASI, JS/browser, host environment, filesystem, raw socket, storage,
+subprocess, dynamic loading, or generic provider dispatch. Clocks and entropy are broker imports,
+not Python modules. Imports including `sys`, `os`, `time`, `random`, `secrets`, `socket`,
 `ssl`, `sqlite3`, `subprocess`, `threading`, `ctypes`, `tkinter`, and `webbrowser` are denied.
 `open`, `input`, and `breakpoint` are absent; guest `compile`, `eval`, and `exec` are denied.
 
-The VM hash seed and custom getrandom backend are deterministic. The backend is non-cryptographic
-and is not exposed to Python. Determinism does not make adversarial scripts safe: host fuel,
+The VM hash seed remains fixed. The getrandom backend uses broker OS entropy only during an
+authorized invocation, fails closed outside it, and is not exposed to Python. Determinism does not make adversarial scripts safe: host fuel,
 deadline, memory, admission, and container limits are mandatory.
 
 ## Limits and operations
 
 See [SECURITY.md](SECURITY.md) for the complete provider/host split and
-[docs/deployment-profile.md](docs/deployment-profile.md) for measured size, latency, fuel floor,
-RSS, and the selected broker profile. A script deliberately gets no generic provider calls, registry
+[docs/deployment-profile.md](docs/deployment-profile.md) for artifact size, import contract and broker memory evidence. Per-memory limits are not process
+RSS; the owner's Pi deployment limits remain a separate decision. A script deliberately gets no generic provider calls, registry
 lookup, proposal submission, shell commands, persistence, or privileged imports.
 
 ## Validation
