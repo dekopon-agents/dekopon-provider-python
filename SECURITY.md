@@ -14,7 +14,7 @@ provider outputs in a public issue.
 ## Broker-granted HTTP boundary
 
 Default-on Cargo feature `http` keeps the Dekopon-specific code boundary and adds only the
-`dekopon:http/client@1.0.0` external import through published `dekopon-provider-http`. The native
+`dekopon:stdio/streams@0.1.0` and `dekopon:http/client@1.2.0` imports through the SDK's typed provider world. The native
 `dekopon_requests` module exposes GET/HEAD only. It implements no socket/transport, dispatcher,
 proposal engine, redirects, retry, cookie jar, ambient proxy, or credential API. Every call is
 checked against the host's existing invocation grant (not a new Cedar decision). The host enforces
@@ -32,7 +32,7 @@ rollback. Resource traps stay host errors. There are no runtime OS-exit semantic
 
 There is one supported release/OCI component, `python-provider.wasm`, one capability,
 `python.eval`, and command word `python`. `tests/component_contract.rs` validates the
-sole raw guest import and exact full external WIT, rejecting WASI and extra authority.
+decoded stdio and HTTP component imports, rejecting WASI and the old provider world.
 Componentizer adapter imports are internal to the validated component. Corresponding-source,
 SBOM and shared byte reproduction cover this HTTP component.
 Disabling default features is only a developer customization, not a distribution branch.
@@ -42,7 +42,8 @@ Disabling default features is only a developer customization, not a distribution
 The security boundary is the validated component plus a correctly configured Dekopon host, not the
 Python import hook:
 
-- the component imports only `dekopon:http/client@1.0.0`, linked by the real broker;
+- the component imports only `dekopon:stdio/streams@0.1.0` and
+  `dekopon:http/client@1.2.0`, linked by the real broker;
 - there is no WASI adapter, JavaScript/browser binding, environment, filesystem, raw socket,
   storage, clock, entropy, subprocess, dynamic-library, or provider-dispatch import;
 - `allow_external_library` is false and the exact public import names are `json`, `re`, `yaml`, and
@@ -55,7 +56,9 @@ Python import hook:
   `threading`, `ctypes`, `tkinter`, and `webbrowser` are denied;
 - the `python` command word's `run-command` export only parses argv. It renders help and usage
   errors, or returns a `python.eval` proposal that the host authorizes exactly like a direct call;
-  it constructs no VM and grants nothing.
+  it constructs no VM and grants nothing. Bare/`-` proposals carry only an stdin marker; the
+  capability reads at most 65,537 script bytes after broker authorization. HTTP callbacks access
+  the invocation's scoped handle, which a drop guard clears on all exits.
 
 Python introspection is not a capability boundary. A script might find implementation objects or
 consume CPU/memory, but host HTTP grants remain authoritative for every request. Pure scripts need no HTTP grant. Admit only the

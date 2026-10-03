@@ -4,6 +4,32 @@ use rustpython_vm::{
     builtins::{PyBaseExceptionRef, PyTypeRef, PyUtf8StrRef},
 };
 
+use dekopon_provider_sdk::provider::{Header, Http, Request};
+use std::cell::RefCell;
+
+thread_local! {
+    // Only an authorized invocation installs its sealed HTTP handle; never an ambient host call.
+    static INVOCATION_HTTP: RefCell<Option<Http>> = const { RefCell::new(None) };
+}
+
+struct ClearHttp;
+impl Drop for ClearHttp {
+    fn drop(&mut self) {
+        INVOCATION_HTTP.with(|slot| {
+            slot.borrow_mut().take();
+        });
+    }
+}
+
+pub(crate) fn with_http<R>(http: Http, f: impl FnOnce() -> R) -> R {
+    INVOCATION_HTTP.with(|slot| {
+        assert!(slot.borrow().is_none(), "nested Python HTTP invocation");
+        *slot.borrow_mut() = Some(http);
+    });
+    let _clear = ClearHttp;
+    f()
+}
+
 const URL_BYTES: usize = 8_192;
 const BODY_BYTES: usize = 131_072;
 
@@ -402,11 +428,8 @@ for name, call in [('RequestException', lambda: r.get('')),
         }
 
         #[test]
-        fn http_wit_matches_the_published_guest_binding() {
-            assert_eq!(
-                include_str!("../wit/deps/http.wit"),
-                dekopon_provider_http::HTTP_WIT
-            );
+        fn outside_invocation_has_no_http_handle() {
+            assert!(INVOCATION_HTTP.with(|slot| slot.borrow().is_none()));
         }
     }
 
@@ -415,17 +438,23 @@ for name, call in [('RequestException', lambda: r.get('')),
             return Err(exception(vm, error(vm), "URL exceeds 8192 UTF-8 bytes"));
         }
         // crates.io and other public APIs refuse a request without one; scripts set no headers.
-        let user_agent = dekopon_provider_http::Header::text(
+        let user_agent = Header::text(
             "user-agent",
             concat!("dekopon-provider-python/", env!("CARGO_PKG_VERSION")),
         )
         .map_err(|_| exception(vm, error(vm), "invalid user-agent"))?;
-        let request = dekopon_provider_http::Request::new(method, url)
+        let request = Request::new(method, url)
             .map_err(|_| exception(vm, error(vm), "invalid URL"))?
             .with_header(user_agent);
-        let response = dekopon_provider_http::send(request)
-            // Stable code only: never copy remote text, URL, or potentially sensitive host detail.
-            .map_err(|failure| exception(vm, error(vm), failure.code.as_str()))?;
+        let response = INVOCATION_HTTP.with(|slot| {
+            let handle = slot.borrow();
+            let http = handle
+                .as_ref()
+                .ok_or_else(|| exception(vm, error(vm), "http not granted"))?;
+            http.send(request)
+                // Stable code only: never copy remote text, URL, or potentially sensitive host detail.
+                .map_err(|failure| exception(vm, error(vm), failure.code.as_str()))
+        })?;
         if response.body.len() > BODY_BYTES {
             return Err(exception(vm, error(vm), "response exceeds 131072 bytes"));
         }

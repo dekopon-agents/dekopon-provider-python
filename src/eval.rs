@@ -102,7 +102,7 @@ pub(crate) fn interpreter() -> Interpreter {
 fn execute(script: &str, vm: &VirtualMachine) -> Result<Value, ErrorDetail> {
     vm.recursion_limit.set(PYTHON_RECURSION);
     capture::install(vm).map_err(|error| python_error(error, vm, "runtime"))?;
-    policy::install(vm).map_err(|error| python_error(error, vm, "runtime"))?;
+    let _closed = policy::install(vm).map_err(|error| python_error(error, vm, "runtime"))?;
 
     let scope = vm.new_scope_with_builtins();
     scope

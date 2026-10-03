@@ -2,25 +2,25 @@
 
 [package]
 name = "dekopon-python-provider"
-version = "0.6.2"
+version = "0.6.3"
 edition = "2024"
 rust-version = "1.98.1"
 license = "MIT OR Apache-2.0"
 description = "A constrained RustPython evaluator with broker-granted HTTP for Dekopon"
 repository = "https://github.com/dekopon-agents/dekopon-provider-python"
 publish = false
-build = "build.rs"
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 
 [features]
 default = ["http"]
-http = ["dep:dekopon-provider-http"]
+http = []
 
 [dependencies]
-dekopon-provider-http = { version = "=0.18.0", optional = true }
-dekopon-provider-sdk = { version = "=0.18.0", features = ["clap"] }
+clap = { version = "=4.6.6", features = ["derive"] }
+dekopon-provider-sdk = "=0.31.0"
+schemars = "=1.2.2"
 getrandom = "=0.3.4"
 num-traits = "=0.2.19"
 rustpython-common = "=0.5.0"
@@ -29,14 +29,10 @@ rustpython-stdlib = { version = "=0.5.0", default-features = false, features = [
 rustpython-vm = { version = "=0.5.0", default-features = false, features = ["compiler", "gc", "encodings", "freeze-stdlib"] }
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "=1.0.151"
-# The SDK's own wit-bindgen, so the component carries one `cabi_realloc`. The bindings select the
-# `provider-cli` world of the byte-pinned `wit/provider.wit` mirror, which exports `run-command`.
-wit-bindgen = { version = "=0.62.0", default-features = false, features = ["macros", "realloc"] }
 yaml-rust2 = { version = "=0.12.0", default-features = false }
 
 [dev-dependencies]
-dekopon-capability = "=0.18.0"
-dekopon-provider-sdk-testkit = "=0.18.0"
+dekopon-provider-sdk-testkit = "=0.31.0"
 tempfile = "=3.27.0"
 tokio = { version = "=1.49.0", default-features = false, features = ["macros", "rt-multi-thread", "sync"] }
 
