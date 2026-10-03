@@ -17,6 +17,9 @@ fn eval(script: &str) -> Value {
 
 #[test]
 fn broker_runs_combined_python_sql_numeric_and_denials() {
+    std::thread::Builder::new()
+        .stack_size(32 * 1024 * 1024)
+        .spawn(|| {
     let joined = eval(
         r#"
 import dekopon_tables as t
@@ -63,8 +66,6 @@ result = {'sum':n.vector_add([1.,2.],[3.,4.]), 'dot':n.dot((1.,2.),(3.,4.)), 'pr
         "import datetime",
         "import socket",
         "import json.decoder",
-        "import dekopon_tables as t\nresult=t.query('COPY t TO \'/tmp/x\'', {'t':[{'id':1}]})",
-        "import dekopon_tables as t\nresult=t.query('SELECT * FROM read_csv(\'/tmp/x\')', {'t':[{'id':1}]})",
         "import dekopon_tables as t\nresult=t.query('SELECT * FROM t; DROP TABLE t', {'t':[{'id':1}]})",
         "import dekopon_tables as t\nresult=t.query('SELECT * FROM t', {'t':[{'id':1},{'id':'bad'}]})",
         "import dekopon_tables as t\nresult=t.query('SELECT * FROM t', {'t':[{'id':1}]*257})",
@@ -80,10 +81,25 @@ result = {'sum':n.vector_add([1.,2.],[3.,4.]), 'dot':n.dot((1.,2.),(3.,4.)), 'pr
         let denial = eval(script);
         assert_eq!(denial["ok"], false, "{script}: {denial}");
     }
+    for script in [
+        r#"import dekopon_tables as t
+result=t.query("COPY t TO '/tmp/x'", {'t':[{'id':1}]})"#,
+        r#"import dekopon_tables as t
+result=t.query("SELECT * FROM read_csv('/tmp/x')", {'t':[{'id':1}]})"#,
+    ] {
+        let denial = eval(script);
+        assert_eq!(denial["ok"], false, "{script}: {denial}");
+        assert_eq!(denial["error"]["kind"], "runtime", "{script}: {denial}");
+        assert_eq!(denial["error"]["type"], "ValueError", "{script}: {denial}");
+    }
     assert_eq!(eval("result = 'x' * 131073")["error"]["kind"], "result");
     let command = Native::<PythonProvider>::new()
         .call("python.eval", &json!({"script":"result=1"}).to_string());
     assert_eq!(command.status, 0, "{}", command.stderr);
+        })
+        .expect("combined test thread")
+        .join()
+        .expect("combined test invocation");
 }
 
 #[test]
