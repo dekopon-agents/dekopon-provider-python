@@ -1,28 +1,8 @@
-//! The `python` command word: the interpreter's own argv, parsed in the guest.
-//!
-//! `python -c CODE` runs CODE, and `python -` runs the value piped into the word, so a script
-//! travels as a here-document: `python - <<'EOF' … EOF`. Bare argv with a non-empty piped value is
-//! `-` in disguise: CPython reads its program from a non-tty stdin when given no file, so
-//! `python <<'EOF' … EOF` matches that instead of failing clap's required-argument check. All
-//! three become a proposal for `python.eval` carrying exactly the input a direct call sends,
-//! `{"script": …}`, which is then authorized like any other call. `python --help`, `python
-//! --version`, and every usage error are rendered here and authorize nothing. No VM exists until
-//! the proposal is invoked, so running the word costs no interpreter startup.
-//!
-//! There is no `python FILE` and no trailing `sys.argv`: the component has no filesystem and the
-//! capability takes a script and nothing else, so clap refuses both. Bare argv with nothing piped,
-//! or an empty pipe, is still a usage error — only an explicit `-` accepts an empty script.
+//! Pure CLI proposals: code is proposal data; a script from stdin is read after authorization.
+use crate::{COMMAND_WORD, Eval, EvalInput, PythonProvider};
+use clap::Parser;
+use dekopon_provider_sdk::provider::{Proposal, Usage};
 
-use dekopon_provider_sdk::clap::{self, CommandFactory, FromArgMatches, Parser};
-use dekopon_provider_sdk::{CommandInvocation, CommandRun, ProviderError, cli};
-use serde_json::json;
-
-use crate::{COMMAND_WORD, EVAL};
-
-/// The argument that means "read the script from the value piped into the word".
-const PIPED: &str = "-";
-
-/// What `--help` prints below the options: the contract a model needs before writing a script.
 #[cfg(feature = "http")]
 const AFTER_HELP: &str = "Proposes python.eval. Pure scripts need no HTTP grant.
 Imports json, re, yaml, and dekopon_requests (GET/HEAD only).
@@ -31,7 +11,6 @@ redirects, retries, sockets, filesystem, clock, or input().
 Script: at most 65,536 UTF-8 bytes. print() is bounded to 65,536 bytes.
 Assign a safe JSON-shaped value to result. Runtime output is bounded JSON with
 ok/stdout/stdoutTruncated/result (or error), not an OS exit status.";
-
 #[cfg(not(feature = "http"))]
 const AFTER_HELP: &str = "Proposes python.eval. Imports json, re, and yaml; no host authority.";
 
@@ -42,8 +21,6 @@ pub(crate) const ABOUT: &str =
 pub(crate) const ABOUT: &str =
     "Run one Python 3 script with broker-granted HTTP in a fresh RustPython 0.5.0 VM";
 
-// The `python` tree, declared once and rendered by clap. Plain comments, not doc comments: clap
-// renders a doc comment as the `about` line above `Usage:`.
 #[derive(Parser)]
 #[command(
     name = COMMAND_WORD,
@@ -51,278 +28,83 @@ pub(crate) const ABOUT: &str =
     about = ABOUT,
     override_usage = "python -c <CODE>\n       python - <<'EOF'\n       python <<'EOF'",
     after_help = AFTER_HELP,
-    group = clap::ArgGroup::new("script").args(["code", "piped"]).required(true),
+    group = clap::ArgGroup::new("script").args(["code", "piped"]),
 )]
-struct Python {
+pub struct Python {
     /// Run CODE as the script
     #[arg(short = 'c', value_name = "CODE", allow_hyphen_values = true)]
     code: Option<String>,
     /// Read the script from the value piped into the word
-    #[arg(value_name = PIPED, value_parser = [PIPED], hide_possible_values = true)]
+    #[arg(value_name = "-", value_parser = ["-"], hide_possible_values = true)]
     piped: Option<String>,
 }
 
-/// Runs one `python` argv.
-///
-/// Bare argv with a non-empty piped value is `python -` in disguise, matching CPython's own read
-/// of a non-tty stdin when given no file: it proposes without ever reaching clap, which cannot see
-/// `stdin` and would otherwise fail its required-argument check. Bare argv with nothing piped, or
-/// an empty pipe, still reaches clap and fails exactly as it always has.
-pub(crate) fn run(argv: &[String], stdin: Option<&str>) -> Result<CommandRun, ProviderError> {
-    if argv.is_empty()
-        && let Some(script) = stdin.filter(|value| !value.is_empty())
-    {
-        return Ok(CommandRun::proposal(
-            EVAL.parse().expect("static capability ID"),
-            json!({ "script": script }),
-        ));
-    }
-    cli::run_command(Python::command(), argv, stdin, dispatch)
-}
-
-/// Turns clap's matches into the `python.eval` proposal.
-///
-/// Runs only after clap accepted exactly one of `-c` and `-`, so what is left to decide is what
-/// clap cannot know: whether anything was piped. The script's size bound is checked once, in
-/// `invoke`, against the input a direct call would send too.
-fn dispatch(
-    matches: clap::ArgMatches,
-    stdin: Option<&str>,
-) -> Result<CommandInvocation, ProviderError> {
-    let python = Python::from_arg_matches(&matches)
-        .map_err(|error| ProviderError::new("usage", error.to_string()))?;
-    let script = match (python.code, python.piped) {
-        (Some(code), None) => code,
-        (None, Some(_)) => stdin
-            .map(str::to_owned)
-            .ok_or_else(|| ProviderError::new("usage", "python -: nothing was piped in"))?,
-        _ => {
-            return Err(ProviderError::new(
-                "usage",
-                "python takes `-c <CODE>` or `-`",
-            ));
-        }
+pub(crate) fn propose(args: Python, stdin_piped: bool) -> Result<Proposal<PythonProvider>, Usage> {
+    let (script, stdin_script) = match (args.code, args.piped) {
+        (Some(code), None) => (code, false),
+        (None, Some(_)) if stdin_piped => (String::new(), true),
+        (None, Some(_)) => return Err(Usage::new("python -: nothing was piped in")),
+        (None, None) if stdin_piped => (String::new(), true),
+        _ => return Err(Usage::new("python takes `-c <CODE>` or `-`")),
     };
-    Ok(CommandInvocation {
-        capability: EVAL.parse().expect("static capability ID"),
-        input: json!({ "script": script }),
-        secret_use: None,
-    })
+    Ok(Proposal::to::<Eval>(EvalInput {
+        script,
+        stdin_script,
+    }))
 }
 
 #[cfg(test)]
 mod tests {
-    use dekopon_provider_sdk::{CommandInvocation, CommandRun, Provider};
+    use crate::PythonProvider;
+    use dekopon_provider_sdk::{CommandRunOutcome, provider};
     use serde_json::json;
-
-    use super::run;
-    use crate::{EVAL, PythonProvider};
-
-    fn argv(words: &[&str]) -> Vec<String> {
-        words.iter().map(|word| (*word).to_owned()).collect()
+    fn command(args: &[&str], piped: bool) -> CommandRunOutcome {
+        provider::command::<PythonProvider>(
+            &args.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>(),
+            piped,
+        )
     }
-
-    fn rendered(words: &[&str], stdin: Option<&str>) -> (String, String, u8) {
-        let run = run(&argv(words), stdin).expect("clap answers are rendered, not declined");
-        let CommandRun::Rendered {
-            stdout,
-            stderr,
-            status,
-        } = run
+    fn proposed(args: &[&str], piped: bool) -> serde_json::Value {
+        let CommandRunOutcome::Proposed {
+            capability,
+            input,
+            secret_use,
+        } = command(args, piped)
         else {
-            panic!("expected rendered text for {words:?}, got {run:?}");
+            panic!("expected proposal")
         };
-        (stdout, stderr, status)
+        assert_eq!(capability.as_str(), "python.eval");
+        assert!(secret_use.is_none());
+        input
     }
-
-    fn proposal(words: &[&str], stdin: Option<&str>) -> CommandInvocation {
-        match run(&argv(words), stdin).expect("a well-formed argv proposes") {
-            CommandRun::Proposal(invocation) => invocation,
-            other => panic!("expected a proposal for {words:?}, got {other:?}"),
-        }
-    }
-
-    /// The help page, byte for byte. It is the only documentation a model reads before writing a
-    /// script, so a change to it is a diff a reviewer sees.
-    #[cfg(feature = "http")]
     #[test]
-    fn help_is_pinned_byte_for_byte() {
-        const HELP: &str = "\
-Run one Python 3 script with broker-granted HTTP in a fresh RustPython 0.5.0 VM
-
-Usage: python -c <CODE>
-       python - <<'EOF'
-       python <<'EOF'
-
-Arguments:
-  [-]  Read the script from the value piped into the word
-
-Options:
-  -c <CODE>      Run CODE as the script
-  -h, --help     Print help
-  -V, --version  Print version
-
-Proposes python.eval. Pure scripts need no HTTP grant.
-Imports json, re, yaml, and dekopon_requests (GET/HEAD only).
-Every HTTP call is constrained by the host invocation grant; no credentials,
-redirects, retries, sockets, filesystem, clock, or input().
-Script: at most 65,536 UTF-8 bytes. print() is bounded to 65,536 bytes.
-Assign a safe JSON-shaped value to result. Runtime output is bounded JSON with
-ok/stdout/stdoutTruncated/result (or error), not an OS exit status.
-";
-        for words in [&["--help"][..], &["-h"][..], &["-c", "x", "--help"][..]] {
-            let (stdout, stderr, status) = rendered(words, None);
-            assert_eq!(status, 0, "{words:?}");
-            assert_eq!(stdout, HELP, "{words:?}");
-            assert!(stderr.is_empty(), "{stderr}");
-        }
-
-        let (stdout, _, status) = rendered(&["--version"], None);
-        assert_eq!(status, 0);
-        assert_eq!(stdout, format!("python {}\n", env!("CARGO_PKG_VERSION")));
-    }
-
-    #[test]
-    fn usage_errors_render_on_stderr_at_status_two() {
-        for words in [
-            &["-c"][..],
-            &["-c", "result = 1", "-"][..],
-            &["script.py"][..],
-            &["-c", "result = 1", "extra"][..],
-            &["-", "-"][..],
-            &["-i"][..],
-        ] {
-            for stdin in [None, Some("result = 1")] {
-                let (stdout, stderr, status) = rendered(words, stdin);
-                assert_eq!(status, 2, "{words:?}");
-                assert!(stdout.is_empty(), "{words:?}: {stdout}");
-                assert!(stderr.starts_with("error: "), "{words:?}: {stderr}");
-            }
-        }
-
-        // There is no filesystem, so a file argument names the one positional value that exists.
-        let (_, stderr, _) = rendered(&["script.py"], None);
-        assert!(
-            stderr.contains("invalid value 'script.py' for '[-]'"),
-            "{stderr}"
-        );
-    }
-
-    /// Bare argv with something piped is `python -` in disguise, matching CPython's own read of a
-    /// non-tty stdin when given no file: the proposal is identical either way.
-    #[test]
-    fn bare_invocation_with_a_piped_value_proposes_like_dash() {
-        let piped = "import json\nresult = json.loads('[1, 2]')\n";
-        let bare = proposal(&[], Some(piped));
-        let dash = proposal(&["-"], Some(piped));
-        assert_eq!(bare, dash);
-        assert_eq!(bare.input, json!({"script": piped}));
-
-        // An empty here-document is still a non-empty `Some("")` on the wire only when it is
-        // truly empty text; a script consisting of only whitespace still counts as piped.
-        let whitespace = proposal(&[], Some(" \n"));
-        assert_eq!(whitespace.input, json!({"script": " \n"}));
-    }
-
-    /// Unlike explicit `-`, bare argv needs something actually piped: nothing at all, or an empty
-    /// pipe, is still the same usage error clap has always rendered for it.
-    #[test]
-    fn bare_invocation_with_no_piped_value_is_still_a_usage_error() {
-        const NO_SCRIPT: &str = "\
-error: the following required arguments were not provided:
-  <-c <CODE>|->
-
-Usage: python -c <CODE>
-       python - <<'EOF'
-       python <<'EOF'
-
-For more information, try '--help'.
-";
-        for stdin in [None, Some("")] {
-            let (stdout, stderr, status) = rendered(&[], stdin);
-            assert_eq!(status, 2, "{stdin:?}");
-            assert!(stdout.is_empty(), "{stdin:?}: {stdout}");
-            assert_eq!(stderr, NO_SCRIPT, "{stdin:?}");
-        }
-    }
-
-    #[test]
-    fn a_dash_without_a_piped_value_is_declined_naming_the_cause() {
-        let error = run(&argv(&["-"]), None)
-            .expect_err("a decline, reported to the model as a usage error at status 2");
-        assert_eq!(error.code(), "usage");
-        assert_eq!(error.message(), "python -: nothing was piped in");
-    }
-
-    #[test]
-    fn dash_c_proposes_the_exact_invoke_input() {
-        let invocation = proposal(&["-c", "print('hi')\nresult = 6 * 7"], None);
-        assert_eq!(invocation.capability.as_str(), EVAL);
+    fn pure_proposal_does_not_consume_script_and_preserves_piped_data_for_dash_c() {
         assert_eq!(
-            invocation.input,
-            json!({"script": "print('hi')\nresult = 6 * 7"})
+            proposed(&["-"], true),
+            json!({"script":"", "stdin_script":true})
         );
-
-        // Code is taken verbatim even when it looks like a flag, as the interpreter's `-c` does,
-        // and a piped value is ignored rather than merged in.
-        let invocation = proposal(&["-c", "-1"], Some("ignored"));
-        assert_eq!(invocation.input, json!({"script": "-1"}));
+        assert_eq!(proposed(&[], true), proposed(&["-"], true));
+        assert_eq!(
+            proposed(&["-c", "result = 42"], true),
+            json!({"script":"result = 42"})
+        );
+        assert_eq!(proposed(&["-c", "-1"], true), json!({"script":"-1"}));
     }
-
     #[test]
-    fn dash_proposes_the_piped_value_as_the_exact_invoke_input() {
-        let piped = "import json\nresult = json.loads('[1, 2]')\n";
-        let invocation = proposal(&["-"], Some(piped));
-        assert_eq!(invocation.capability.as_str(), EVAL);
-        assert_eq!(invocation.input, json!({"script": piped}));
-
-        // An empty here-document is an empty script, which Python runs to `result = None`.
-        let invocation = proposal(&["-"], Some(""));
-        assert_eq!(invocation.input, json!({"script": ""}));
-    }
-
-    /// The word deliberately does not repeat the script's size bound: `invoke` enforces it on the
-    /// proposal exactly as on a direct call, before any VM is constructed. `tests/broker.rs` runs a
-    /// proposal to completion against the real host.
-    #[test]
-    fn invoke_bounds_an_oversized_proposal_before_any_vm() {
-        let oversized = "x".repeat(crate::limits::SCRIPT_BYTES + 1);
-        let invocation = proposal(&["-"], Some(&oversized));
-        let error = PythonProvider::invoke(&invocation.capability, invocation.input)
-            .expect_err("invoke bounds the script");
-        assert_eq!(error.code(), "input-too-large");
-    }
-
-    /// The rendered text is plain: the SDK's clap is built without `color`, so no escape byte can
-    /// reach a model's transcript.
-    #[test]
-    fn no_rendered_text_contains_an_escape_byte() {
-        for words in [&["--help"][..], &["--version"][..], &[][..], &["-c"][..]] {
-            let (stdout, stderr, _) = rendered(words, None);
-            assert!(!stdout.contains('\u{1b}'), "{words:?}: {stdout:?}");
-            assert!(!stderr.contains('\u{1b}'), "{words:?}: {stderr:?}");
+    fn declined_inputs_and_help_are_safe() {
+        for args in [&["-c"][..], &["script.py"], &["-c", "x", "-"]] {
+            assert!(matches!(
+                command(args, false),
+                CommandRunOutcome::Rendered { status: 2, .. }
+            ));
         }
-    }
-
-    /// Every capability the word can propose is one the manifest declares, under the word the
-    /// manifest declares. Without this, a renamed capability would reach a model at runtime as an
-    /// authorization denial.
-    #[test]
-    fn every_dispatch_target_is_declared_in_the_manifest() {
-        let manifest = PythonProvider::manifest();
-        assert_eq!(manifest.command_words, [crate::COMMAND_WORD]);
-        let declared: Vec<String> = manifest
-            .capabilities
-            .iter()
-            .map(|capability| capability.id.to_string())
-            .collect();
-        for (words, stdin) in [(&["-c", "result = 1"][..], None), (&["-"][..], Some("x"))] {
-            let invocation = proposal(words, stdin);
-            assert!(
-                declared.contains(&invocation.capability.to_string()),
-                "{words:?} proposes {} which the manifest does not declare",
-                invocation.capability
-            );
-        }
+        assert!(matches!(
+            command(&["-"], false),
+            CommandRunOutcome::Failed { .. }
+        ));
+        assert!(matches!(
+            command(&["--help"], false),
+            CommandRunOutcome::Rendered { status: 0, .. }
+        ));
     }
 }

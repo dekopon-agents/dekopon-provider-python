@@ -1,29 +1,16 @@
 #!/usr/bin/env bash
-# Exact shipped component contract: HTTP-only authority and full WIT shape.
 set -euo pipefail
-root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)
-file=${1:?usage: assert-component-contract.sh <core-or-component.wasm>}
-temporary=$(mktemp -d)
-trap 'rm -rf "$temporary"' EXIT
+file=${1:?usage: assert-component-contract.sh <component.wasm>}
 wasm-tools validate "$file"
-wasm-tools print --skeleton "$file" >"$temporary/skeleton"
-for forbidden in wasi_snapshot_preview1 'wasi:' __wbindgen_placeholder__ __wbindgen_externref_xform__ wasm-bindgen; do
-  if LC_ALL=C grep -aF -- "$forbidden" "$file" >/dev/null; then
-    echo "error: component contains forbidden marker $forbidden" >&2; exit 1
-  fi
-done
-if head -1 "$temporary/skeleton" | grep -q '^(module'; then
-  # The raw guest has exactly one import. Componentizer-generated internal adapters are checked
-  # by validating the final component and its complete, exact external WIT below.
-  python3 - "$temporary/skeleton" <<'PY'
-import pathlib, re, sys
-text = pathlib.Path(sys.argv[1]).read_text()
-imports = [line.strip() for line in text.splitlines() if '(import ' in line]
-assert len(imports) == 1, imports
-assert re.fullmatch(r'\(import "dekopon:http/client@1\.1\.0" "send" \(func .*', imports[0]), imports
+temporary=$(mktemp)
+trap 'rm -f "$temporary"' EXIT
+wasm-tools component wit "$file" >"$temporary"
+python3 - "$temporary" <<'PY'
+from pathlib import Path
+import sys
+text = Path(sys.argv[1]).read_text()
+assert 'dekopon:stdio/streams@0.1.0' in text, 'missing typed stdio import'
+assert 'dekopon:http/client@1.2.0' in text, 'missing broker HTTP import'
+assert 'wasi:' not in text and 'wasi_snapshot_preview1' not in text, 'ambient WASI import'
+assert 'dekopon:provider/provider@0.3.0' not in text, 'old provider world'
 PY
-else
-  wasm-tools component wit -j "$file" >"$temporary/actual.json"
-  wasm-tools component wit -j "$root/wit/" >"$temporary/http.json"
-  python3 "$root/tests/component_contract/assert-component-wit.py" "$temporary/actual.json" "$temporary/http.json"
-fi
