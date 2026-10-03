@@ -4,6 +4,7 @@ use std::sync::Arc;
 use datafusion::{
     arrow::{
         array::{Array, ArrayRef, BooleanArray, Float64Array, Int64Array, StringArray},
+        compute::cast,
         datatypes::{DataType, Field, Schema},
         record_batch::RecordBatch,
         util::display::array_value_to_string,
@@ -156,6 +157,7 @@ fn record_batch(rows: &[Value]) -> Result<RecordBatch, String> {
             .ok_or("all-null columns need a type")?;
         let dtype = match kind {
             Value::Bool(_) => DataType::Boolean,
+            Value::Number(_) if values.iter().any(|v| v.is_f64()) => DataType::Float64,
             Value::Number(n) if n.as_i64().is_some() => DataType::Int64,
             Value::Number(n) if n.as_f64().is_some() => DataType::Float64,
             Value::String(_) => DataType::Utf8,
@@ -196,12 +198,16 @@ fn record_batch(rows: &[Value]) -> Result<RecordBatch, String> {
 fn project(columns: &[String], batches: &[RecordBatch]) -> Result<Value, String> {
     let mut rows = Vec::new();
     for batch in batches {
+        let arrays = batch
+            .columns()
+            .iter()
+            .map(widen)
+            .collect::<Result<Vec<_>, _>>()?;
         for index in 0..batch.num_rows() {
             if rows.len() >= MAX_OUTPUT_ROWS {
                 return Err("query exceeds 256 output rows".into());
             }
-            let row = batch
-                .columns()
+            let row = arrays
                 .iter()
                 .map(|column| cell(column.as_ref(), index))
                 .collect::<Result<Vec<_>, _>>()?;
@@ -213,6 +219,20 @@ fn project(columns: &[String], batches: &[RecordBatch]) -> Result<Value, String>
         return Err("SQL result exceeds safe result bytes".into());
     }
     Ok(output)
+}
+
+fn widen(array: &ArrayRef) -> Result<ArrayRef, String> {
+    let target = match array.data_type() {
+        DataType::Int8
+        | DataType::Int16
+        | DataType::Int32
+        | DataType::UInt8
+        | DataType::UInt16
+        | DataType::UInt32 => DataType::Int64,
+        DataType::Utf8View | DataType::LargeUtf8 => DataType::Utf8,
+        _ => return Ok(Arc::clone(array)),
+    };
+    cast(array, &target).map_err(bounded_error)
 }
 
 fn cell(array: &dyn Array, index: usize) -> Result<Value, String> {
@@ -304,5 +324,25 @@ mod tests {
         }
         assert!(run("SELECT * FROM t", &json!({"t":[{"id":1},{"id":"bad"}]})).is_err());
         assert!(run("SELECT * FROM t", &json!({"t":5})).is_err());
+    }
+
+    #[test]
+    fn integer_then_float_column_is_float() {
+        let output = run(
+            "SELECT price FROM t",
+            &json!({"t":[{"price":10},{"price":10.5}]}),
+        )
+        .expect("mixed numeric column");
+        assert_eq!(output, json!({"columns":["price"],"rows":[[10.0],[10.5]]}));
+    }
+
+    #[test]
+    fn narrow_integer_results_project_as_integers() {
+        let output = run(
+            "SELECT length(name) AS n FROM t",
+            &json!({"t":[{"name":"abc"}]}),
+        )
+        .expect("length() result");
+        assert_eq!(output, json!({"columns":["n"],"rows":[[3]]}));
     }
 }
