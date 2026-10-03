@@ -76,6 +76,7 @@ fn no_http_handle_outside_invocation_and_no_reuse_in_next_invocation() {
             assert_eq!(denied.status, 0, "{}", denied.stderr);
             assert_eq!(result(&denied.stdout)["ok"], false);
             assert_eq!(result(&denied.stdout)["error"]["kind"], "runtime");
+            assert_eq!(result(&denied.stdout)["error"]["message"], "http not granted");
         })
         .unwrap()
         .join()
