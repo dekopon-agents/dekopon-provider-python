@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-04
+
+### Added
+
+- Add `dekopon_subshell.run(script, stdin=None|INHERIT)` under the invocation's spawn authority. Return bounded child stdout and a `CompletedRun` status envelope; do not grant OS subprocess or new provider authority.
+
+### Changed
+
+- Pin SDK and testkit to 0.33.0; the component imports HTTP 1.1.0 and spawn 0.1.0. Document inherited stdin consumption and child exit semantics.
+
 ## [0.7.0] - 2026-10-03
 
 ### Added

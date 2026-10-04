@@ -1,8 +1,8 @@
-# Deployment profile — v0.7.0 combined toolkit
+# Deployment profile — v0.8.0 combined toolkit and child scripts
 
-The provider combines a fresh RustPython interpreter, in-memory DataFusion SQL and bounded
-numeric functions. It has not been deployed to the Pi. The broker's configured limits and
-measured component properties below are different kinds of evidence: an artifact file size is not
+The provider combines a fresh RustPython interpreter, in-memory DataFusion SQL, bounded
+numeric functions and scoped child shell scripts. It has not been deployed to the Pi. The
+broker's configured limits and measured component properties below are different kinds of evidence: an artifact file size is not
 a linear-memory bound, and a per-memory cap is not a container-RSS or aggregate-admission cap.
 
 ## Decoded import contract and artifact
@@ -12,25 +12,29 @@ a linear-memory bound, and a per-memory cap is not a container-RSS or aggregate-
 | Interface | Use |
 |---|---|
 | `dekopon:stdio/streams@0.1.0` | typed stdin/stdout |
-| `dekopon:http/client@1.2.0` | authorized `dekopon_requests` GET/HEAD |
+| `dekopon:http/client@1.1.0` | authorized `dekopon_requests` GET/HEAD |
 | `dekopon:clock/wall@1.1.0` | DataFusion raw wall-clock import |
 | `dekopon:clock/monotonic@1.1.0` | DataFusion raw monotonic import |
 | `dekopon:random/source@0.1.0` | invocation-scoped SDK OS entropy |
+| `dekopon:spawn/run@0.1.0` | invocation-scoped `dekopon_subshell` child scripts |
 
-No WASI, storage, filesystem, process or socket import is present. The clocks are declared
-because DataFusion imports them; the provider does not call their handles. The custom getrandom
+No WASI, storage, OS process or socket import is present. Spawn invokes a Dekopon child
+shell script on the same invocation authority, not an OS process import; it supplies no
+new grants. With `INHERIT`, the child takes the rest of parent stdin (which may be read
+ahead); do not read parent stdin after it returns. Non-empty child stdout ends in a
+newline, stderr is empty in core 0.33.0, and a child panic returns status 70. The clocks are
+declared because DataFusion imports them; the provider does not call their handles. The custom getrandom
 backend holds the random handle only while `python.eval` runs and has no fallback source. The
 RustPython hash seed remains fixed independently.
 
 | Exact shared-build artifact | Value |
 |---|---:|
-| Size | 49,349,203 bytes (47.063 MiB) |
-| SHA-256 | `ca63a6e178a0334833cb0f3c64fa5ac6494608bc5aaccdc70c6e23f26788ea05` |
+| Size | 49,370,395 bytes (47.083 MiB) |
+| SHA-256 | `eba65311fffcdb1dc844b748a571f2deb7faa8383eb4d70325076f7cd427b9d3` |
 | Artifact ceiling | 67,108,864 bytes (64 MiB); passes |
 
 The release profile uses `opt-level = "s"`, fat LTO, one codegen unit, abort-on-panic and symbol
-stripping. This digest identifies the measured local component; publication verifies the build
-and checksum again. Core SDK/testkit are pinned to the published 0.32.0 crates
+stripping. This is the local shared-build digest, not a published release digest; release validates the artifact and checksum again. Core SDK/testkit are pinned to the published 0.33.0 crates
 and the DataFusion fork to `cf3778098ad3ea283ecd8ee2a991be7d9a29750c`.
 
 ## Broker profile and workload evidence
