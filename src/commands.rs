@@ -11,7 +11,10 @@ redirects, retries, sockets, filesystem, clock, or input().
 dekopon_subshell.run(script, stdin=None|INHERIT) runs a child Dekopon shell
 script under this invocation's grants and returns CompletedRun(returncode,
 stdout, stderr, truncated); stdout is capped at 65,536 bytes. INHERIT hands the
-child the rest of this invocation's stdin.
+child the rest of this invocation's stdin; do not read parent stdin afterwards.
+Non-empty child stdout ends in a newline; child stderr is empty in core 0.33;
+a child panic returns status 70, and nonzero status is returned, not raised.
+No input= bytes or OS subprocess is available.
 Script: at most 65,536 UTF-8 bytes. print() is bounded to 65,536 bytes.
 Assign a safe JSON-shaped value to result. Runtime output is bounded JSON with
 ok/stdout/stdoutTruncated/result (or error), not an OS exit status.";
@@ -106,9 +109,20 @@ mod tests {
             command(&["-"], false),
             CommandRunOutcome::Failed { .. }
         ));
-        assert!(matches!(
-            command(&["--help"], false),
-            CommandRunOutcome::Rendered { status: 0, .. }
-        ));
+        let CommandRunOutcome::Rendered {
+            status: 0, stdout, ..
+        } = command(&["--help"], false)
+        else {
+            panic!("expected safe help")
+        };
+        #[cfg(feature = "http")]
+        for phrase in [
+            "dekopon_subshell.run",
+            "INHERIT",
+            "status 70",
+            "No input= bytes",
+        ] {
+            assert!(stdout.contains(phrase), "{phrase}");
+        }
     }
 }

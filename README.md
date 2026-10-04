@@ -1,10 +1,12 @@
 # Dekopon Python provider
 
-A WebAssembly component with broker-granted HTTP exposing one read-only, High-risk capability:
+A WebAssembly component with broker-granted HTTP and child-script execution exposing one
+High-risk capability:
 `python.eval`. It embeds **RustPython 0.5.0 exactly**, creates a fresh interpreter per call,
 captures bounded stdout in Rust, and returns only a bounded JSON-shaped result. A Dekopon shell
-reaches it through the `python` command word. Version 0.7.0 brings the combined SQL and numeric
-toolkit onto the typed stdio SDK, pinned to the published Dekopon SDK 0.32.0. It exports `run-command` through the current provider world.
+reaches it through the `python` command word. Version 0.8.0 adds `dekopon_subshell` to the
+combined toolkit, pinned to the published Dekopon SDK 0.33.0. It exports `run-command` through
+the current provider world.
 
 > **Release status: owner-approved.** The owner accepted the exact LGPL dependencies for this
 > standalone optional provider; this records a project policy choice, not attorney review. LGPL is
@@ -20,9 +22,10 @@ and command word **`python`**. Cargo feature `http` is default-on and keeps Deko
 HTTP code clearly separated; disabling defaults is a developer customization, not a supported
 CI or distribution variant. Ordinary Cargo builds include `dekopon_requests`.
 The component imports exactly `dekopon:stdio/streams@0.1.0`,
-`dekopon:http/client@1.2.0`, `dekopon:clock/wall@1.1.0`,
-`dekopon:clock/monotonic@1.1.0`, and `dekopon:random/source@0.1.0`.
-The broker must link all five even for pure scripts, which succeed without HTTP grants.
+`dekopon:http/client@1.1.0`, `dekopon:clock/wall@1.1.0`,
+`dekopon:clock/monotonic@1.1.0`, `dekopon:random/source@0.1.0`, and
+`dekopon:spawn/run@0.1.0`. The broker must link all six even for pure scripts,
+which succeed without HTTP or child-script grants.
 DataFusion's raw clock imports account for both clocks; SQL's native entropy uses the SDK's
 invocation-scoped random handle. Bare empty-linker Wasmtime cannot instantiate the component.
 
@@ -85,11 +88,13 @@ and component checks all run through the shared
 cargo fmt --all --check
 cargo clippy --locked --workspace --all-targets -- -D warnings
 cargo deny --all-features check bans licenses sources advisories
-../provider-workflows/build.sh
-DEKOPON_PROVIDER_COMPONENT=$PWD/python-provider.wasm cargo test --locked --workspace
+AR_wasm32_unknown_unknown=/opt/homebrew/opt/llvm/bin/llvm-ar bash ../provider-workflows/build.sh
+DEKOPON_PROVIDER_COMPONENT=$PWD/python-provider.wasm cargo test --locked --workspace --all-features
 ```
 
-`../provider-workflows/build.sh` is a sibling checkout of the shared workflows repository (see its
+The `AR_wasm32_unknown_unknown` override is needed on macOS where Apple `ar` creates an empty
+zstd Wasm archive; Linux CI runs the shared build without it. `../provider-workflows/build.sh`
+is a sibling checkout of the shared workflows repository (see its
 own README for the exact clone step CI uses); it writes `python-provider.wasm` and its checksum,
 and componentizes it. The shared workflow validates it. Two RustPython 0.5.0 crates are vendored under `patches/` with one
 reproducibility fix each: `rustpython-derive-impl` sorts `py_freeze!` module traversal and every
@@ -212,6 +217,31 @@ exact lists/tuples, and exact dicts with exact string keys. Maximum depth is 32,
 is 10,000 (mapping keys count), and the encoded result is at most 131,072 bytes. Cycles, subclasses,
 custom conversion hooks, and unsupported objects are rejected.
 
+### Child scripts (`dekopon_subshell`)
+
+```python
+import dekopon_subshell as s
+r = s.run("gh pr list -R dekopon-agents/dekopon | rg x")
+result = {"returncode": r.returncode, "stdout": r.stdout,
+          "stderr": r.stderr, "truncated": r.truncated}
+```
+
+`run(script, stdin=None|INHERIT)` executes a **Dekopon child shell script**, not an OS
+subprocess, under the same agent, invocation grants, call budget and tree deadline. The host
+must authorize child execution and every child capability call. No shell command or grant is
+implicitly available: the example requires existing `gh` read and ripgrep grants and must not
+be run against production without those grants. `run` accepts a UTF-8 script of at most 65,536
+bytes, no `input=` bytes, and returns `CompletedRun(returncode, stdout, stderr, truncated)`.
+Child stdout is decoded with UTF-8 replacement and captured to 65,536 bytes at a character
+boundary; `truncated` reports stdout truncation. A nonzero exit is returned, not raised;
+a child panic reports status 70. Non-empty child output ends with a newline, and child
+`stderr` is empty in core 0.33.0. `stdin=None` supplies no stdin; `stdin=s.INHERIT` gives the
+child the **rest** of the parent's stdin. The host may read ahead, so do not read parent stdin
+after an inherited run. This is not a way to pass arbitrary bytes to a child.
+`SubshellError` reports unavailable spawn authority, busy/refused child execution or a
+child-stdout read failure; invalid `stdin` types raise `TypeError`. No handle persists after
+the invocation.
+
 ### Supported modules
 
 Only these exact public module names are compatibility promises; direct imports of private
@@ -222,6 +252,7 @@ submodules such as `re._parser` and `json.decoder` are denied:
 - `yaml` — this provider's native constrained facade with exactly `safe_load(str)`,
   `safe_dump(safe_value)`, and `YAMLError`;
 - `dekopon_requests` — bounded GET/HEAD under the invocation HTTP grant described above;
+- `dekopon_subshell` — bounded child script execution through the invocation spawn handle;
 - `dekopon_tables` — `query(sql, tables)` for one query-only SELECT over at most four supplied
   in-memory tables (256 input rows total, eight columns per table). At most 256 rows and 16 columns
   are projected; disk spill is disabled, the query pool is 8 MiB, and external sources, COPY,
@@ -262,10 +293,10 @@ stdlib/package compatibility, pip, or persistence.
 
 ## Denied authority and determinism
 
-The exact component contract allows only Dekopon stdio, HTTP, wall and monotonic clocks, and
-OS entropy. There is no WASI, JS/browser, host environment, filesystem, raw socket, storage,
-subprocess, dynamic loading, or generic provider dispatch. Clocks and entropy are broker imports,
-not Python modules. Imports including `sys`, `os`, `time`, `random`, `secrets`, `socket`,
+The exact component contract allows only Dekopon stdio, HTTP 1.1, wall and monotonic clocks,
+OS entropy, and spawn 0.1. There is no WASI, JS/browser, host environment, filesystem, raw
+socket, storage, OS subprocess, dynamic loading, or generic provider dispatch. Clocks and
+entropy are broker imports, not Python modules. Imports including `sys`, `os`, `time`, `random`, `secrets`, `socket`,
 `ssl`, `sqlite3`, `subprocess`, `threading`, `ctypes`, `tkinter`, and `webbrowser` are denied.
 `open`, `input`, and `breakpoint` are absent; guest `compile`, `eval`, and `exec` are denied.
 
@@ -277,8 +308,9 @@ deadline, memory, admission, and container limits are mandatory.
 
 See [SECURITY.md](SECURITY.md) for the complete provider/host split and
 [docs/deployment-profile.md](docs/deployment-profile.md) for artifact size, import contract and broker memory evidence. Per-memory limits are not process
-RSS; the owner's Pi deployment limits remain a separate decision. A script deliberately gets no generic provider calls, registry
-lookup, proposal submission, shell commands, persistence, or privileged imports.
+RSS; the owner's Pi deployment limits remain a separate decision. A script gets no generic
+provider dispatch, registry lookup, proposal submission, persistence, or privileged imports. Child shell scripts are available only through the scoped spawn handle
+and the host's existing authority.
 
 ## Validation
 

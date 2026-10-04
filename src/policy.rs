@@ -268,7 +268,15 @@ mod tests {
 
     #[test]
     fn allowlist_is_exact_and_closed() {
-        for allowed in ["json", "re", "yaml", "dekopon_numeric", "dekopon_tables"] {
+        for allowed in [
+            "json",
+            "re",
+            "yaml",
+            "dekopon_requests",
+            "dekopon_subshell",
+            "dekopon_numeric",
+            "dekopon_tables",
+        ] {
             assert!(is_allowed_module(allowed), "{allowed}");
         }
         for denied in [

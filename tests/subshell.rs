@@ -114,6 +114,40 @@ fn stdin_is_none_by_default_and_inherit_hands_over_the_rest() {
 }
 
 #[test]
+fn subshell_errors_and_closed_imports() {
+    on_big_stack(|| {
+        let local = Native::<PythonProvider>::new();
+        let refused = native(&local, "s.run('x' * 65537)");
+        assert_eq!(refused["error"]["type"], "SubshellError", "{refused}");
+        assert_eq!(
+            refused["error"]["message"],
+            "script exceeds 65536 UTF-8 bytes"
+        );
+        let bad_input = native(&local, &format!("s.run({PIPELINE:?}, input=b'data')"));
+        assert_eq!(bad_input["error"]["type"], "TypeError", "{bad_input}");
+        for module in ["subprocess", "os", "sys", "socket", "ctypes"] {
+            let denied = native(&local, &format!("import {module}"));
+            assert_eq!(denied["ok"], false, "{module}: {denied}");
+            assert_eq!(denied["error"]["type"], "ImportError", "{module}: {denied}");
+        }
+        assert!(local.children().is_empty());
+    });
+}
+
+#[test]
+fn offline_pipeline_fixture_returns_bounded_envelope() {
+    on_big_stack(|| {
+        let local = Native::<PythonProvider>::new().child(child(0, b"x #123 fix\n"));
+        let output = native(&local, &format!("r = s.run({PIPELINE:?})\n{ENVELOPE}"));
+        assert_eq!(
+            output["result"],
+            json!({"returncode": 0, "stdout": "x #123 fix\n", "stderr": "", "truncated": false})
+        );
+        assert_eq!(local.children()[0].script, PIPELINE);
+    });
+}
+
+#[test]
 fn component_and_native_subshell_agree() {
     let component: PathBuf = std::env::var_os("DEKOPON_PROVIDER_COMPONENT")
         .expect("DEKOPON_PROVIDER_COMPONENT must point at freshly built component")

@@ -2,11 +2,11 @@
 
 [package]
 name = "dekopon-python-provider"
-version = "0.7.0"
+version = "0.8.0"
 edition = "2024"
 rust-version = "1.98.1"
 license = "MIT OR Apache-2.0"
-description = "A constrained RustPython evaluator with broker-granted HTTP for Dekopon"
+description = "A constrained RustPython evaluator with broker-granted HTTP and child scripts for Dekopon"
 repository = "https://github.com/dekopon-agents/dekopon-provider-python"
 publish = false
 
