@@ -9,13 +9,15 @@ mod numeric;
 mod policy;
 #[cfg(feature = "http")]
 mod requests;
+#[cfg(feature = "http")]
+mod subshell;
 mod tables;
 mod value;
 mod yaml;
 
 use dekopon_provider_sdk::provider::{
-    self, Capability, Clock, Code, Failure, Http, Monotonic, Proposal, Provider, Random, Stdout,
-    Usage,
+    self, Capability, Clock, Code, Failure, Http, Monotonic, Proposal, Provider, Random, Spawn,
+    Stdout, Usage,
 };
 use dekopon_provider_sdk::{EffectKind, RiskLevel};
 use schemars::JsonSchema;
@@ -84,16 +86,16 @@ impl Provider for PythonProvider {
 impl Capability for Eval {
     type Provider = PythonProvider;
     const NAME: &'static str = "eval";
-    const DESCRIPTION: &'static str = "Evaluate bounded Python with in-memory dekopon_tables SQL, dekopon_numeric, and broker-granted dekopon_requests GET/HEAD; assign output to result";
+    const DESCRIPTION: &'static str = "Evaluate bounded Python with in-memory dekopon_tables SQL, dekopon_numeric, broker-granted dekopon_requests GET/HEAD, and dekopon_subshell child scripts; assign output to result";
     const EFFECT: EffectKind = EffectKind::ReadOnly;
     const RISK: RiskLevel = RiskLevel::High;
     type Input = EvalInput;
-    type Needs = (Http, Clock, Monotonic, Random);
+    type Needs = (Http, Clock, Monotonic, Random, Spawn);
     type Error = PythonError;
 
     fn run(
         mut input: Self::Input,
-        (http, _clock, _monotonic, random): Self::Needs,
+        (http, _clock, _monotonic, random, spawn): Self::Needs,
         out: &mut Stdout,
     ) -> Result<(), Self::Error> {
         if input.stdin_script {
@@ -127,10 +129,12 @@ impl Capability for Eval {
         }
         let _entropy = entropy::EntropyScope::install(random);
         #[cfg(feature = "http")]
-        let result = requests::with_http(http, || eval::evaluate(&input.script));
+        let result = requests::with_http(http, || {
+            subshell::with_spawn(spawn, || eval::evaluate(&input.script))
+        });
         #[cfg(not(feature = "http"))]
         let result = {
-            let _ = http;
+            let _ = (http, spawn);
             eval::evaluate(&input.script)
         };
         let mut json = serde_json::to_vec(&result).map_err(|_| {

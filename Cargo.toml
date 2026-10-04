@@ -19,7 +19,7 @@ http = []
 
 [dependencies]
 clap = { version = "=4.6.6", features = ["derive"] }
-dekopon-provider-sdk = "=0.32.0"
+dekopon-provider-sdk = "=0.33.0"
 datafusion = { git = "https://github.com/dekopon-agents/datafusion.git", rev = "cf3778098ad3ea283ecd8ee2a991be7d9a29750c", default-features = false, features = ["sql", "dekopon-wasm", "string_expressions", "datetime_expressions"] }
 ndarray = { version = "=0.17.2", default-features = false, features = ["std"] }
 statrs = { version = "=0.19.1", default-features = false, features = ["std"] }
@@ -37,7 +37,7 @@ serde_json = "=1.0.151"
 yaml-rust2 = { version = "=0.12.0", default-features = false }
 
 [dev-dependencies]
-dekopon-provider-sdk-testkit = "=0.32.0"
+dekopon-provider-sdk-testkit = "=0.33.0"
 tempfile = "=3.27.0"
 tokio = { version = "=1.52.4", default-features = false, features = ["macros", "rt-multi-thread", "sync"] }
 
