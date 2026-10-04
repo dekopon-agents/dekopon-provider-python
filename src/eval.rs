@@ -94,7 +94,10 @@ pub(crate) fn interpreter() -> Interpreter {
         crate::yaml::yaml_module::module_def(&builder.ctx),
     ]);
     #[cfg(feature = "http")]
-    definitions.push(crate::requests::requests_module::module_def(&builder.ctx));
+    definitions.extend([
+        crate::requests::requests_module::module_def(&builder.ctx),
+        crate::subshell::subshell_module::module_def(&builder.ctx),
+    ]);
     builder
         .add_native_modules(&definitions)
         .add_frozen_modules(rustpython_pylib::FROZEN_STDLIB)

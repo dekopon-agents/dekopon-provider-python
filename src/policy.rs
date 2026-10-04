@@ -11,6 +11,8 @@ const ALLOWED_MODULES: &[&str] = &[
     "dekopon_tables",
     #[cfg(feature = "http")]
     "dekopon_requests",
+    #[cfg(feature = "http")]
+    "dekopon_subshell",
 ];
 const REMOVED_BUILTINS: [&str; 6] = ["open", "input", "breakpoint", "compile", "eval", "exec"];
 const DENIED_MODULES: [&str; 15] = [

@@ -5,9 +5,13 @@ use dekopon_provider_sdk::provider::{Proposal, Usage};
 
 #[cfg(feature = "http")]
 const AFTER_HELP: &str = "Proposes python.eval. Pure scripts need no HTTP grant.
-Imports json, re, yaml, and dekopon_requests (GET/HEAD only).
+Imports json, re, yaml, dekopon_requests (GET/HEAD only), and dekopon_subshell.
 Every HTTP call is constrained by the host invocation grant; no credentials,
 redirects, retries, sockets, filesystem, clock, or input().
+dekopon_subshell.run(script, stdin=None|INHERIT) runs a child Dekopon shell
+script under this invocation's grants and returns CompletedRun(returncode,
+stdout, stderr, truncated); stdout is capped at 65,536 bytes. INHERIT hands the
+child the rest of this invocation's stdin.
 Script: at most 65,536 UTF-8 bytes. print() is bounded to 65,536 bytes.
 Assign a safe JSON-shaped value to result. Runtime output is bounded JSON with
 ok/stdout/stdoutTruncated/result (or error), not an OS exit status.";

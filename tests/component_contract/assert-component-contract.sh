@@ -15,10 +15,11 @@ declarations = re.findall(r'(?m)^\s*import\b[^\n]*', world)
 assert len(re.findall(r'\bimport\b', world)) == len(declarations), 'unparsed root-world import'
 expected = {
     'dekopon:stdio/streams@0.1.0',
-    'dekopon:http/client@1.2.0',
+    'dekopon:http/client@1.1.0',
     'dekopon:clock/wall@1.1.0',
     'dekopon:clock/monotonic@1.1.0',
     'dekopon:random/source@0.1.0',
+    'dekopon:spawn/run@0.1.0',
 }
 assert len(declarations) == len(expected) and {line.strip() for line in declarations} == {
     f'import {name};' for name in expected
