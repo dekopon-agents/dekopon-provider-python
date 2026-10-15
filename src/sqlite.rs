@@ -289,17 +289,6 @@ fn sql_has_multiple_statements(sql: &str) -> bool {
     false
 }
 
-#[cfg(test)]
-mod tests {
-    use super::sql_has_multiple_statements;
-    #[test]
-    fn rejects_second_sql_statement_without_rejecting_semicolons_in_literals() {
-        assert!(sql_has_multiple_statements("SELECT 1; DELETE FROM note"));
-        assert!(!sql_has_multiple_statements("SELECT ';'"));
-        assert!(!sql_has_multiple_statements("SELECT 1;"));
-    }
-}
-
 fn value_size(value: &Value) -> usize {
     match value {
         Value::Text(s) => s.as_str().len(),
@@ -377,4 +366,15 @@ fn parameter(param: &rustpython_vm::PyObjectRef, vm: &VirtualMachine) -> PyResul
         return Ok(Value::from_blob(bytes.to_vec()));
     }
     Err(vm.new_type_error("unsupported SQL parameter"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sql_has_multiple_statements;
+    #[test]
+    fn rejects_second_sql_statement_without_rejecting_semicolons_in_literals() {
+        assert!(sql_has_multiple_statements("SELECT 1; DELETE FROM note"));
+        assert!(!sql_has_multiple_statements("SELECT ';'"));
+        assert!(!sql_has_multiple_statements("SELECT 1;"));
+    }
 }
