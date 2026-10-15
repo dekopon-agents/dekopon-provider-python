@@ -27,9 +27,13 @@ const TABLES_HELP: &str = "dekopon_tables is available for bounded in-memory SQL
 #[cfg(not(feature = "tables"))]
 const TABLES_HELP: &str = "dekopon_tables is not built into this component.";
 
-#[cfg(feature = "tables")]
+#[cfg(all(feature = "http", feature = "tables"))]
+pub(crate) const CAPABILITY_DESCRIPTION: &str = "Evaluate bounded Python with in-memory dekopon_tables SQL, dekopon_numeric, invocation time, broker-granted dekopon_requests GET/HEAD and dekopon_subshell child scripts; assign output to result";
+#[cfg(all(feature = "http", not(feature = "tables")))]
+pub(crate) const CAPABILITY_DESCRIPTION: &str = "Evaluate bounded Python with dekopon_numeric, invocation time, broker-granted dekopon_requests GET/HEAD and dekopon_subshell child scripts; assign output to result";
+#[cfg(all(not(feature = "http"), feature = "tables"))]
 pub(crate) const CAPABILITY_DESCRIPTION: &str = "Evaluate bounded Python with in-memory dekopon_tables SQL, dekopon_numeric and invocation time; assign output to result";
-#[cfg(not(feature = "tables"))]
+#[cfg(all(not(feature = "http"), not(feature = "tables")))]
 pub(crate) const CAPABILITY_DESCRIPTION: &str =
     "Evaluate bounded Python with dekopon_numeric and invocation time; assign output to result";
 
@@ -131,6 +135,21 @@ mod tests {
         };
         for phrase in ["dekopon_numeric", "time (wall/monotonic)", TABLES_HELP] {
             assert!(stdout.contains(phrase), "{phrase}");
+        }
+        let description = <crate::Eval as provider::Capability>::DESCRIPTION;
+        for phrase in ["dekopon_numeric", "invocation time"] {
+            assert!(description.contains(phrase), "{phrase}: {description}");
+        }
+        assert_eq!(
+            description.contains("dekopon_tables"),
+            cfg!(feature = "tables")
+        );
+        for phrase in ["dekopon_requests", "dekopon_subshell"] {
+            assert_eq!(
+                description.contains(phrase),
+                cfg!(feature = "http"),
+                "{phrase}: {description}"
+            );
         }
         #[cfg(feature = "http")]
         for phrase in [

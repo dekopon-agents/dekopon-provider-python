@@ -127,13 +127,19 @@ fn default_component_has_numeric_time_and_denies_tables_and_escape() {
         "{result}"
     );
     assert_eq!(result["result"][2], 23.0);
-    let native = Native::<PythonProvider>::new().clock(instant).call(
-        "python.eval",
-        &json!({"script":"import time\nresult=time.time()"}).to_string(),
-    );
+    // The real-component host measures elapsed invocation time; the published native
+    // fixture supplies an exact nonzero monotonic value that a constant-zero facade fails.
+    let native = Native::<PythonProvider>::new()
+        .clock(instant)
+        .monotonic(12_500_000_000)
+        .call(
+            "python.eval",
+            &json!({"script":"import time\nresult=[time.time(), time.monotonic()]"}).to_string(),
+        );
     assert_eq!(native.status, 0, "{}", native.stderr);
     let native_result: Value = serde_json::from_slice(&native.stdout).unwrap();
-    assert_eq!(native_result["result"], result["result"][0]);
+    assert_eq!(native_result["result"][0], result["result"][0]);
+    assert_eq!(native_result["result"][1], 12.5);
 
     #[cfg(not(feature = "tables"))]
     {
