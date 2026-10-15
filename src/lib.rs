@@ -11,7 +11,9 @@ mod policy;
 mod requests;
 #[cfg(feature = "http")]
 mod subshell;
+#[cfg(feature = "tables")]
 mod tables;
+mod time;
 mod value;
 mod yaml;
 
@@ -86,7 +88,7 @@ impl Provider for PythonProvider {
 impl Capability for Eval {
     type Provider = PythonProvider;
     const NAME: &'static str = "eval";
-    const DESCRIPTION: &'static str = "Evaluate bounded Python with in-memory dekopon_tables SQL, dekopon_numeric, broker-granted dekopon_requests GET/HEAD, and dekopon_subshell child scripts; assign output to result";
+    const DESCRIPTION: &'static str = commands::CAPABILITY_DESCRIPTION;
     const EFFECT: EffectKind = EffectKind::ReadOnly;
     const RISK: RiskLevel = RiskLevel::High;
     type Input = EvalInput;
@@ -95,7 +97,7 @@ impl Capability for Eval {
 
     fn run(
         mut input: Self::Input,
-        (http, _clock, _monotonic, random, spawn): Self::Needs,
+        (http, clock, monotonic, random, spawn): Self::Needs,
         out: &mut Stdout,
     ) -> Result<(), Self::Error> {
         if input.stdin_script {
@@ -128,15 +130,19 @@ impl Capability for Eval {
             ));
         }
         let _entropy = entropy::EntropyScope::install(random);
-        #[cfg(feature = "http")]
-        let result = requests::with_http(http, || {
-            subshell::with_spawn(spawn, || eval::evaluate(&input.script))
+        let result = time::with_clocks(clock, monotonic, || {
+            #[cfg(feature = "http")]
+            {
+                requests::with_http(http, || {
+                    subshell::with_spawn(spawn, || eval::evaluate(&input.script))
+                })
+            }
+            #[cfg(not(feature = "http"))]
+            {
+                let _ = (http, spawn);
+                eval::evaluate(&input.script)
+            }
         });
-        #[cfg(not(feature = "http"))]
-        let result = {
-            let _ = (http, spawn);
-            eval::evaluate(&input.script)
-        };
         let mut json = serde_json::to_vec(&result).map_err(|_| {
             PythonError::new(
                 Code::new("serialization-failed"),

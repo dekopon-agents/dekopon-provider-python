@@ -7,7 +7,9 @@ const ALLOWED_MODULES: &[&str] = &[
     "json",
     "re",
     "yaml",
+    "time",
     "dekopon_numeric",
+    #[cfg(feature = "tables")]
     "dekopon_tables",
     #[cfg(feature = "http")]
     "dekopon_requests",
@@ -15,11 +17,10 @@ const ALLOWED_MODULES: &[&str] = &[
     "dekopon_subshell",
 ];
 const REMOVED_BUILTINS: [&str; 6] = ["open", "input", "breakpoint", "compile", "eval", "exec"];
-const DENIED_MODULES: [&str; 15] = [
+const DENIED_MODULES: [&str; 14] = [
     "sys",
     "os",
     "pathlib",
-    "time",
     "random",
     "secrets",
     "socket",
@@ -272,19 +273,22 @@ mod tests {
             "json",
             "re",
             "yaml",
+            "time",
             "dekopon_requests",
             "dekopon_subshell",
             "dekopon_numeric",
-            "dekopon_tables",
         ] {
             assert!(is_allowed_module(allowed), "{allowed}");
         }
+        assert_eq!(
+            is_allowed_module("dekopon_tables"),
+            cfg!(feature = "tables")
+        );
         for denied in [
             "re._parser",
             "json.decoder",
             "sys",
             "os",
-            "time",
             "random",
             "socket",
             "subprocess",

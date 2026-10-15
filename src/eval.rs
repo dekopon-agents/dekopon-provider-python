@@ -90,9 +90,11 @@ pub(crate) fn interpreter() -> Interpreter {
         crate::capture::stderr_module::module_def(&builder.ctx),
         crate::policy::policy_module::module_def(&builder.ctx),
         crate::numeric::numeric_module::module_def(&builder.ctx),
-        crate::tables::tables_module::module_def(&builder.ctx),
+        crate::time::time_module::module_def(&builder.ctx),
         crate::yaml::yaml_module::module_def(&builder.ctx),
     ]);
+    #[cfg(feature = "tables")]
+    definitions.push(crate::tables::tables_module::module_def(&builder.ctx));
     #[cfg(feature = "http")]
     definitions.extend([
         crate::requests::requests_module::module_def(&builder.ctx),
@@ -213,6 +215,18 @@ mod tests {
     }
 
     #[test]
+    fn clocks_refuse_outside_invocation_instead_of_reading_during_metadata() {
+        let output = evaluate("import time\nresult=time.time()");
+        assert_eq!(output["error"]["type"], "RuntimeError", "{output}");
+        assert_eq!(
+            output["error"]["message"],
+            "clock unavailable outside invocation"
+        );
+        let output = evaluate("import time\nresult=time.monotonic()");
+        assert_eq!(output["error"]["type"], "RuntimeError", "{output}");
+    }
+
+    #[test]
     fn requests_import_matches_the_compiled_authority_contract() {
         let output = evaluate(
             "import dekopon_requests as requests\nresult = [hasattr(requests, 'get'), hasattr(requests, 'head'), hasattr(requests, 'post'), issubclass(requests.HTTPError, requests.RequestException)]",
@@ -268,7 +282,6 @@ result = {
         for script in [
             "import os",
             "import sys",
-            "import time",
             "import random",
             "import secrets",
             "import socket",

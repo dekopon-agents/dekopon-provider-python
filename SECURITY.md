@@ -48,15 +48,16 @@ Python import hook:
   `dekopon:spawn/run@0.1.0`;
 - there is no WASI adapter, JavaScript/browser binding, environment, filesystem, raw socket,
   storage, OS-subprocess, dynamic-library, or generic provider-dispatch import; the clocks and
-  entropy are available to native code through broker handles, not Python import authority;
+  entropy are available through broker handles; only the bounded invocation clock facade is Python-visible;
 - `allow_external_library` is false and the exact public import names are `json`, `re`, `yaml`,
-  `dekopon_requests`, `dekopon_subshell`, `dekopon_tables`, and `dekopon_numeric`; private
+  `time`, `dekopon_requests`, `dekopon_subshell`, and `dekopon_numeric` (plus
+  `dekopon_tables` only with the optional `tables` feature); private
   dependency modules are preloaded below the guest-visible import guard;
 - `open`, `input`, `breakpoint`, `compile`, `eval`, and `exec` are removed after trusted frozen
   modules are preloaded; no original privileged callable is retained on a Python-reachable object;
-- the Python-visible module registry is replaced with the seven exact public modules, and denied
+- the Python-visible module registry is replaced with the built public modules, and denied
   transitive module references are removed from loaded module namespaces;
-- `sys`, `os`, `pathlib`, `time`, `random`, `secrets`, `socket`, `ssl`, `sqlite3`, `subprocess`,
+- `sys`, `os`, `pathlib`, `random`, `secrets`, `socket`, `ssl`, `sqlite3`, `subprocess`,
   `threading`, `ctypes`, `tkinter`, and `webbrowser` are denied;
 - the `python` command word's `run-command` export only parses argv. It renders help and usage
   errors, or returns a `python.eval` proposal that the host authorizes exactly like a direct call;

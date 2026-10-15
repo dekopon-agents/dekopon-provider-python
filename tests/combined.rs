@@ -1,7 +1,10 @@
 use dekopon_provider_sdk_testkit::{Harness, Native, conformance};
 use dekopon_python_provider::PythonProvider;
 use serde_json::{Value, json};
-use std::path::PathBuf;
+use std::{
+    path::PathBuf,
+    time::{Duration, UNIX_EPOCH},
+};
 
 fn component() -> PathBuf {
     PathBuf::from(std::env::var_os("DEKOPON_PROVIDER_COMPONENT").expect("built component path"))
@@ -15,6 +18,7 @@ fn eval(script: &str) -> Value {
     serde_json::from_slice(&output.stdout).expect("JSON response")
 }
 
+#[cfg(feature = "tables")]
 #[test]
 fn broker_runs_combined_python_sql_numeric_and_denials() {
     std::thread::Builder::new()
@@ -100,6 +104,64 @@ result=t.query("SELECT * FROM read_csv('/tmp/x')", {'t':[{'id':1}]})"#,
         .expect("combined test thread")
         .join()
         .expect("combined test invocation");
+}
+
+#[test]
+fn default_component_has_numeric_time_and_denies_tables_and_escape() {
+    std::thread::Builder::new()
+        .stack_size(32 * 1024 * 1024)
+        .spawn(|| {
+    let instant = UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let output = Harness::<PythonProvider>::get(component())
+        .clock(instant)
+        .call("python.eval", json!({"script":"import time, dekopon_numeric as n\nresult=[time.time(), time.monotonic(), n.dot([2.,3.],[4.,5.])]"}))
+        .expect("controlled component invocation");
+    assert_eq!(output.status, 0, "{}", output.stderr);
+    let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(result["ok"], true, "{result}");
+    assert_eq!(result["result"][0], 1_700_000_000.0);
+    assert!(
+        result["result"][1]
+            .as_f64()
+            .is_some_and(|v| (0.0..60.0).contains(&v)),
+        "{result}"
+    );
+    assert_eq!(result["result"][2], 23.0);
+    let native = Native::<PythonProvider>::new().clock(instant).call(
+        "python.eval",
+        &json!({"script":"import time\nresult=time.time()"}).to_string(),
+    );
+    assert_eq!(native.status, 0, "{}", native.stderr);
+    let native_result: Value = serde_json::from_slice(&native.stdout).unwrap();
+    assert_eq!(native_result["result"], result["result"][0]);
+
+    #[cfg(not(feature = "tables"))]
+    {
+        let denied = eval("import dekopon_tables");
+        assert_eq!(denied["error"]["type"], "ImportError", "{denied}");
+    }
+    #[cfg(feature = "tables")]
+    assert_eq!(
+        eval("import dekopon_tables as t\nresult=t.query('SELECT id FROM t', {'t':[{'id':7}]})")["result"]
+            ["rows"],
+        json!([[7]])
+    );
+
+    for script in [
+        "open('/tmp/escape')",
+        "import socket",
+        "import os",
+        "import sys",
+        "import json.decoder",
+        "().__class__.__base__.__subclasses__()",
+    ] {
+        let denied = eval(script);
+        assert_eq!(denied["ok"], false, "{script}: {denied}");
+    }
+        })
+        .expect("component test thread")
+        .join()
+        .expect("component test invocation");
 }
 
 #[test]

@@ -15,6 +15,22 @@ fn component_has_exact_combined_toolkit_authority() {
         status.success(),
         "component authority or WIT contract drift"
     );
+    let bytes = std::fs::read(std::env::var_os("DEKOPON_PROVIDER_COMPONENT").unwrap())
+        .expect("built component bytes");
+    #[cfg(not(feature = "tables"))]
+    assert!(
+        !bytes
+            .windows(b"datafusion".len())
+            .any(|window| window.eq_ignore_ascii_case(b"datafusion")),
+        "default component embeds DataFusion"
+    );
+    #[cfg(feature = "tables")]
+    assert!(
+        bytes
+            .windows(b"datafusion".len())
+            .any(|window| window.eq_ignore_ascii_case(b"datafusion")),
+        "tables component must embed DataFusion"
+    );
 }
 
 #[test]
