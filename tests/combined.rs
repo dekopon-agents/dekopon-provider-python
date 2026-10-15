@@ -199,15 +199,31 @@ result = [math.sqrt(4), collections.deque([1,2]).pop(),
             ]);
             let built = eval(script);
             assert_eq!(built["result"], expected, "{built}");
-            for script in [
-                "import io\nio.open('x')",
-                "import io\nio.FileIO('x')",
-                "open('x')",
-                "import datetime",
-                "import statistics",
+            for (script, kind, message) in [
+                (
+                    "import io\nio.open('x')",
+                    "AttributeError",
+                    "module '_io' has no attribute 'open'",
+                ),
+                (
+                    "import io\nio.open_code('x')",
+                    "AttributeError",
+                    "module '_io' has no attribute 'open_code'",
+                ),
+                (
+                    "import io\nio.FileIO('x')",
+                    "AttributeError",
+                    "module '_io' has no attribute 'FileIO'",
+                ),
+                ("open('x')", "NameError", "name 'open' is not defined"),
             ] {
                 let output = eval(script);
-                assert_eq!(output["ok"], false, "{script}: {output}");
+                assert_eq!(output["error"]["type"], kind, "{script}: {output}");
+                assert_eq!(output["error"]["message"], message, "{script}: {output}");
+            }
+            for script in ["import datetime", "import statistics"] {
+                let output = eval(script);
+                assert_eq!(output["error"]["type"], "ImportError", "{script}: {output}");
             }
             for name in ["os", "sys", "socket", "subprocess"] {
                 let output = eval(&format!("import {name}"));
