@@ -21,6 +21,7 @@ tables = ["dep:datafusion", "dep:tokio"]
 [dependencies]
 clap = { version = "=4.6.6", features = ["derive"] }
 dekopon-provider-sdk = "=0.33.0"
+dekopon-turso-sql-provider = { git = "https://github.com/dekopon-agents/dekopon-provider-turso-sql", rev = "8d1409c2ef644c13a1a3e36e4dc5cb975e4b414b", default-features = false }
 datafusion = { git = "https://github.com/dekopon-agents/datafusion.git", rev = "cf3778098ad3ea283ecd8ee2a991be7d9a29750c", default-features = false, optional = true, features = ["sql", "dekopon-wasm", "string_expressions", "datetime_expressions"] }
 ndarray = { version = "=0.17.2", default-features = false, features = ["std"] }
 statrs = { version = "=0.19.1", default-features = false, features = ["std"] }

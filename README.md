@@ -144,7 +144,11 @@ There is no `python FILE` and no `sys.argv`: the component has no filesystem and
 takes only a script, named by `-c`, `-`, or nothing at all when stdin is piped
 in — `python <<'EOF' … EOF` matches CPython's own read of a non-tty stdin when given no file.
 The script reader bounds bytes and validates UTF-8 only after authorization; `-c` retains stdin
-as program data rather than interpreting it as script.
+as program data rather than interpreting it as script. `python sql -c CODE` (or `python sql -`
+with piped input) proposes the separate local-write `python.sqlite-eval` grant. In this interim
+2a build that capability fails closed without opening storage; the bounded `sqlite3` facade
+and persisted-row interoperability are deferred to 2b. Existing `python.eval` grants cannot
+invoke it, and `python -c` still cannot import `sqlite3`.
 
 ## Running it
 
@@ -180,7 +184,7 @@ above explicitly.
 
 ## API
 
-Input is exactly:
+Both capabilities use the same exact input shape:
 
 ```json
 {"script": "Python 3 source"}
@@ -302,7 +306,7 @@ stdlib/package compatibility, pip, or persistence.
 
 The exact component contract allows only Dekopon stdio, HTTP 1.1, wall and monotonic clocks,
 OS entropy, and spawn 0.1. There is no WASI, JS/browser, host environment, filesystem, raw
-socket, storage, OS subprocess, dynamic loading, or generic provider dispatch. Entropy is a broker import; the clocks back `time` only during invocation. Imports including `sys`, `os`, `random`, `secrets`, `socket`,
+socket, usable storage (until the 2b sqlite3 facade), OS subprocess, dynamic loading, or generic provider dispatch. Entropy is a broker import; the clocks back `time` only during invocation. Imports including `sys`, `os`, `random`, `secrets`, `socket`,
 `ssl`, `sqlite3`, `subprocess`, `threading`, `ctypes`, `tkinter`, and `webbrowser` are denied.
 `open`, `input`, and `breakpoint` are absent; guest `compile`, `eval`, and `exec` are denied.
 

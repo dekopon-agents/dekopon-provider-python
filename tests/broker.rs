@@ -20,10 +20,14 @@ fn manifest_and_component_conform_to_typed_stdio() -> Result<(), Box<dyn std::er
     let manifest = provider::manifest::<PythonProvider>()?;
     assert_eq!(manifest.id.as_str(), "python");
     assert_eq!(manifest.command_words, ["python"]);
-    assert_eq!(manifest.capabilities.len(), 1);
-    let cap = &manifest.capabilities[0];
-    assert_eq!(cap.id.as_str(), "python.eval");
-    assert_eq!(cap.input_schema["additionalProperties"], false);
+    assert_eq!(manifest.capabilities.len(), 2);
+    let read = &manifest.capabilities[0];
+    let write = &manifest.capabilities[1];
+    assert_eq!(read.id.as_str(), "python.eval");
+    assert_eq!(write.id.as_str(), "python.sqlite-eval");
+    assert_eq!(read.effect, dekopon_provider_sdk::EffectKind::ReadOnly);
+    assert_eq!(write.effect, dekopon_provider_sdk::EffectKind::LocalWrite);
+    assert_eq!(write.input_schema["additionalProperties"], false);
     Ok(())
 }
 
@@ -89,6 +93,34 @@ fn input_bound_and_invalid_input_are_rejected_before_vm_or_http() {
             .expect("invalid input reported");
         assert_ne!(result.status, 0);
     }
+}
+
+#[test]
+fn sql_grant_cannot_expand_old_eval_and_unfinished_facade_fails_closed() {
+    let path = component();
+    let old = Harness::<PythonProvider>::get(&path)
+        .call("python.eval", json!({"script":"import sqlite3"}))
+        .expect("old capability");
+    assert_eq!(old.status, 0, "{}", old.stderr);
+    assert_eq!(answer(&old.stdout)["error"]["type"], "ImportError");
+    let sql = Harness::<PythonProvider>::get(&path)
+        .call("python.sqlite-eval", json!({"script":"import sqlite3"}))
+        .expect("separate SQL capability");
+    assert_ne!(sql.status, 0);
+    for input in [
+        json!({"script":"", "filename":"main.db"}),
+        json!({"script":null}),
+        json!({"script":"", "unknown":1}),
+    ] {
+        let rejected = Harness::<PythonProvider>::get(&path)
+            .call("python.sqlite-eval", input)
+            .expect("invalid schema is refused");
+        assert_ne!(rejected.status, 0);
+    }
+    let native = Native::<PythonProvider>::new();
+    let rejected = native.call("python.sqlite-eval", &json!({"script":""}).to_string());
+    assert_ne!(rejected.status, 0);
+    assert!(native.requests().is_empty());
 }
 
 #[test]

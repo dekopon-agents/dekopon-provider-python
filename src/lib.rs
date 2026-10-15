@@ -18,8 +18,8 @@ mod value;
 mod yaml;
 
 use dekopon_provider_sdk::provider::{
-    self, Capability, Clock, Code, Failure, Http, Monotonic, Proposal, Provider, Random, Spawn,
-    Stdout, Usage,
+    self, Capability, Clock, Code, DurableFiles, Failure, Http, Monotonic, Proposal, Provider,
+    Random, Spawn, Stdout, Storage, Usage,
 };
 use dekopon_provider_sdk::{EffectKind, RiskLevel};
 use schemars::JsonSchema;
@@ -38,6 +38,8 @@ pub(crate) const COMMAND_WORD: &str = "python";
 pub struct PythonProvider;
 /// Execute one script in a fresh constrained interpreter.
 pub struct Eval;
+/// Separately authorized persistent SQL evaluation (the SQL facade lands in S2b).
+pub struct SqliteEval;
 
 /// An exact, bounded script or an authorized request to read the script from stdin.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -78,7 +80,7 @@ impl Provider for PythonProvider {
     const COMMAND_WORDS: &'static [&'static str] = &[COMMAND_WORD];
     const DESCRIPTION: &'static str = commands::ABOUT;
     type Args = commands::Python;
-    type Capabilities = (Eval,);
+    type Capabilities = (Eval, SqliteEval);
 
     fn propose(args: Self::Args, stdin_piped: bool) -> Result<Proposal<Self>, Usage> {
         commands::propose(args, stdin_piped)
@@ -156,6 +158,33 @@ impl Capability for Eval {
                 "python output could not be written",
             )
         })
+    }
+}
+
+// Until the bounded sqlite3 facade lands, fail closed after authorization, without
+// ever opening the namespace database. In particular this cannot widen python.eval.
+impl Capability for SqliteEval {
+    type Provider = PythonProvider;
+    const NAME: &'static str = "sqlite-eval";
+    const DESCRIPTION: &'static str =
+        "Separately authorized Python SQL over broker-owned durable files";
+    const EFFECT: EffectKind = EffectKind::LocalWrite;
+    const RISK: RiskLevel = RiskLevel::High;
+    type Input = EvalInput;
+    type Needs = (Storage<DurableFiles>, Http, Clock, Monotonic, Random, Spawn);
+    type Error = PythonError;
+
+    fn run(input: Self::Input, _needs: Self::Needs, _out: &mut Stdout) -> Result<(), Self::Error> {
+        if input.script.len() > SCRIPT_BYTES || input.stdin_script && !input.script.is_empty() {
+            return Err(PythonError::new(
+                Code::INVALID_INPUT,
+                "invalid SQL script input",
+            ));
+        }
+        Err(PythonError::new(
+            Code::new("unsupported"),
+            "sqlite3 is not available in this build",
+        ))
     }
 }
 
