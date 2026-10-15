@@ -239,6 +239,15 @@ pub(crate) fn install(vm: &VirtualMachine) -> PyResult<ClosedIntrospection> {
         }
     }
 
+    // namedtuple calls guest eval after import, which the policy removes. Do not advertise a
+    // callable that fails with NameError or restore eval; existing import-time tuples survive.
+    if let Some((_, collections)) = public_modules
+        .iter()
+        .find(|(name, _)| *name == "collections")
+    {
+        collections.del_attr("namedtuple", vm)?;
+    }
+
     // enum is an implementation detail of re and was the shortest path to enum.sys.modules.
     // RegexFlag has already been constructed, and normal matching/compilation does not need this
     // module-global reference after initialization.

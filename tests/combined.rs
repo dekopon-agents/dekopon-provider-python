@@ -199,6 +199,15 @@ result = [math.sqrt(4), collections.deque([1,2]).pop(),
             ]);
             let built = eval(script);
             assert_eq!(built["result"], expected, "{built}");
+            let decimal_tuple = eval("import decimal\nt=decimal.Decimal('1.5').as_tuple()\nresult=[t.sign, list(t.digits), t.exponent]");
+            assert_eq!(decimal_tuple["result"], json!([0, [1, 5], -1]), "{decimal_tuple}");
+            for (script, kind) in [
+                ("from collections import namedtuple", "ImportError"),
+                ("import collections\ncollections.namedtuple", "AttributeError"),
+            ] {
+                let denied = eval(script);
+                assert_eq!(denied["error"]["type"], kind, "{script}: {denied}");
+            }
             for (script, kind, message) in [
                 (
                     "import io\nio.open('x')",
