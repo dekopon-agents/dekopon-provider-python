@@ -18,7 +18,9 @@ a linear-memory bound, and a per-memory cap is not a container-RSS or aggregate-
 | `dekopon:random/source@0.1.0` | invocation-scoped SDK OS entropy |
 | `dekopon:spawn/run@0.1.0` | invocation-scoped `dekopon_subshell` child scripts |
 
-No WASI, storage, OS process or socket import is present. Spawn invokes a Dekopon child
+No WASI, OS process or socket import is present. The separate fail-closed
+`python.sqlite-eval` capability adds a durable-files import, but `python.eval`
+remains read-only; no storage rollout is included in this interim build. Spawn invokes a Dekopon child
 shell script on the same invocation authority, not an OS process import; it supplies no
 new grants. With `INHERIT`, the child takes the rest of parent stdin (which may be read
 ahead); do not read parent stdin after it returns. Non-empty child stdout ends in a
