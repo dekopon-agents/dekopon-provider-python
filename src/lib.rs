@@ -103,7 +103,12 @@ impl Capability for Eval {
         (http, clock, monotonic, random, spawn): Self::Needs,
         out: &mut Stdout,
     ) -> Result<(), Self::Error> {
-        let script = read_script(input, provider::stdin(), false)?;
+        let pipe = if input.stdin_script {
+            provider::stdin()
+        } else {
+            None
+        };
+        let script = read_script(input, pipe, false)?;
         let _entropy = entropy::EntropyScope::install(random);
         let result = time::with_clocks(clock, monotonic, || {
             #[cfg(feature = "http")]
@@ -150,7 +155,12 @@ impl Capability for SqliteEval {
         (storage, clock, monotonic, random): Self::Needs,
         out: &mut Stdout,
     ) -> Result<(), Self::Error> {
-        let script = read_script(input, provider::stdin(), true)?;
+        let pipe = if input.stdin_script {
+            provider::stdin()
+        } else {
+            None
+        };
+        let script = read_script(input, pipe, true)?;
         let _entropy = entropy::EntropyScope::install(random);
         let result = time::with_clocks(clock, monotonic, || {
             dekopon_turso_sql_io::with_database(
