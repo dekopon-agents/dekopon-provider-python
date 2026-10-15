@@ -166,10 +166,14 @@ mod tests {
             &["-c", "x", "-"],
             &["sql", "file.py"],
         ] {
-            assert!(matches!(
-                command(args, false),
-                CommandRunOutcome::Rendered { status: 2, .. }
-            ), "{args:?}: {:?}", command(args, false));
+            assert!(
+                matches!(
+                    command(args, false),
+                    CommandRunOutcome::Rendered { status: 2, .. }
+                ),
+                "{args:?}: {:?}",
+                command(args, false)
+            );
         }
         assert!(matches!(
             command(&["sql", "-c", "x", "-"], false),
