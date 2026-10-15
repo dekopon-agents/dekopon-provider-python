@@ -174,13 +174,17 @@ impl Capability for SqliteEval {
     type Needs = (Storage<DurableFiles>, Http, Clock, Monotonic, Random, Spawn);
     type Error = PythonError;
 
-    fn run(input: Self::Input, _needs: Self::Needs, _out: &mut Stdout) -> Result<(), Self::Error> {
+    fn run(input: Self::Input, needs: Self::Needs, _out: &mut Stdout) -> Result<(), Self::Error> {
         if input.script.len() > SCRIPT_BYTES || input.stdin_script && !input.script.is_empty() {
             return Err(PythonError::new(
                 Code::INVALID_INPUT,
                 "invalid SQL script input",
             ));
         }
+        // Materialize the declared durable-files import in the built component. This
+        // read-only probe neither opens nor creates the database; S2b replaces it
+        // with the shared adapter's with_database entry point.
+        let _ = needs.0.stat(dekopon_turso_sql_io::DATABASE);
         Err(PythonError::new(
             Code::new("unsupported"),
             "sqlite3 is not available in this build",

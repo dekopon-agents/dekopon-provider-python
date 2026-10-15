@@ -103,18 +103,22 @@ fn sql_grant_cannot_expand_old_eval_and_unfinished_facade_fails_closed() {
         .expect("old capability");
     assert_eq!(old.status, 0, "{}", old.stderr);
     assert_eq!(answer(&old.stdout)["error"]["type"], "ImportError");
-    let sql = Harness::<PythonProvider>::get(&path)
-        .call("python.sqlite-eval", json!({"script":"import sqlite3"}))
-        .expect("separate SQL capability");
-    assert_ne!(sql.status, 0);
+    // The published testkit supplies no durable-files grant. A real component
+    // must be rejected by its host rather than silently executing the script.
+    assert!(
+        Harness::<PythonProvider>::get(&path)
+            .call("python.sqlite-eval", json!({"script":"import sqlite3"}))
+            .is_err()
+    );
     for input in [
         json!({"script":"", "filename":"main.db"}),
         json!({"script":null}),
         json!({"script":"", "unknown":1}),
+        json!({"script":"result=1", "stdin_script":true}),
     ] {
         let rejected = Harness::<PythonProvider>::get(&path)
             .call("python.sqlite-eval", input)
-            .expect("invalid schema is refused");
+            .expect("schema refusal precedes the unavailable storage call");
         assert_ne!(rejected.status, 0);
     }
     let native = Native::<PythonProvider>::new();
