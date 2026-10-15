@@ -18,8 +18,8 @@ mod value;
 mod yaml;
 
 use dekopon_provider_sdk::provider::{
-    self, Capability, Clock, Code, Failure, Http, Monotonic, Proposal, Provider, Random, Spawn,
-    Stdout, Usage,
+    self, Capability, Clock, Code, DurableFiles, Failure, Http, Monotonic, Proposal, Provider,
+    Random, Spawn, Stdout, Storage, Usage,
 };
 use dekopon_provider_sdk::{EffectKind, RiskLevel};
 use schemars::JsonSchema;
@@ -38,6 +38,8 @@ pub(crate) const COMMAND_WORD: &str = "python";
 pub struct PythonProvider;
 /// Execute one script in a fresh constrained interpreter.
 pub struct Eval;
+/// Separately authorized persistent SQL evaluation (the SQL facade lands in S2b).
+pub struct SqliteEval;
 
 /// An exact, bounded script or an authorized request to read the script from stdin.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -78,7 +80,7 @@ impl Provider for PythonProvider {
     const COMMAND_WORDS: &'static [&'static str] = &[COMMAND_WORD];
     const DESCRIPTION: &'static str = commands::ABOUT;
     type Args = commands::Python;
-    type Capabilities = (Eval,);
+    type Capabilities = (Eval, SqliteEval);
 
     fn propose(args: Self::Args, stdin_piped: bool) -> Result<Proposal<Self>, Usage> {
         commands::propose(args, stdin_piped)
@@ -156,6 +158,95 @@ impl Capability for Eval {
                 "python output could not be written",
             )
         })
+    }
+}
+
+// Until the bounded sqlite3 facade lands, fail closed after authorization, without
+// ever opening the namespace database. In particular this cannot widen python.eval.
+impl Capability for SqliteEval {
+    type Provider = PythonProvider;
+    const NAME: &'static str = "sqlite-eval";
+    const DESCRIPTION: &'static str =
+        "Separately authorized Python SQL over broker-owned durable files";
+    const EFFECT: EffectKind = EffectKind::LocalWrite;
+    const RISK: RiskLevel = RiskLevel::High;
+    type Input = EvalInput;
+    type Needs = (Storage<DurableFiles>, Http, Clock, Monotonic, Random, Spawn);
+    type Error = PythonError;
+
+    fn run(input: Self::Input, needs: Self::Needs, _out: &mut Stdout) -> Result<(), Self::Error> {
+        let pipe = if input.stdin_script {
+            provider::stdin()
+        } else {
+            None
+        };
+        let _script = validate_sql_script(input, pipe)?;
+        // Materialize the declared durable-files import in the built component. This
+        // read-only probe neither opens nor creates the database; S2b replaces it
+        // with the shared adapter's with_database entry point.
+        let _ = needs.0.stat(dekopon_turso_sql_io::DATABASE);
+        Err(PythonError::new(
+            Code::new("unsupported"),
+            "sqlite3 is not available in this build",
+        ))
+    }
+}
+
+// Validation is deliberately independent of the storage handle: even an ungranted
+// storage host must see the input error before any durable-files import is called.
+fn validate_sql_script(
+    mut input: EvalInput,
+    pipe: Option<impl Read>,
+) -> Result<String, PythonError> {
+    if input.stdin_script {
+        if !input.script.is_empty() {
+            return Err(PythonError::new(
+                Code::INVALID_INPUT,
+                "stdin script cannot contain inline code",
+            ));
+        }
+        let mut raw = Vec::new();
+        pipe.ok_or_else(|| {
+            PythonError::new(Code::INVALID_INPUT, "python sql -: nothing was piped in")
+        })?
+        .take((SCRIPT_BYTES + 1) as u64)
+        .read_to_end(&mut raw)
+        .map_err(|_| PythonError::new(Code::INVALID_INPUT, "python sql -: invalid piped script"))?;
+        if raw.len() > SCRIPT_BYTES {
+            return Err(PythonError::new(
+                Code::INVALID_INPUT,
+                "script exceeds UTF-8 byte limit",
+            ));
+        }
+        input.script = String::from_utf8(raw).map_err(|_| {
+            PythonError::new(Code::INVALID_INPUT, "python sql -: invalid UTF-8 script")
+        })?;
+    }
+    if input.script.len() > SCRIPT_BYTES {
+        return Err(PythonError::new(
+            Code::INVALID_INPUT,
+            "script exceeds UTF-8 byte limit",
+        ));
+    }
+    Ok(input.script)
+}
+
+#[cfg(test)]
+mod sql_input_tests {
+    use super::{EvalInput, validate_sql_script};
+    use dekopon_provider_sdk::provider::{Code, Failure};
+    use std::io::Cursor;
+
+    #[test]
+    fn invalid_piped_sql_returns_typed_invalid_input_before_storage() {
+        let input = || EvalInput {
+            script: String::new(),
+            stdin_script: true,
+        };
+        for pipe in [None, Some(vec![b'x'; 65_537]), Some(vec![0xff])] {
+            let result = validate_sql_script(input(), pipe.map(Cursor::new));
+            assert_eq!(result.unwrap_err().code(), Code::INVALID_INPUT);
+        }
     }
 }
 

@@ -30,8 +30,9 @@ content stays bytes; text decodes UTF-8 with replacement. Stdout and complete ca
 retain their existing bounds. Data failures may follow successful network requests and do not imply
 rollback. Resource traps stay host errors. There are no runtime OS-exit semantics.
 
-There is one supported release/OCI component, `python-provider.wasm`, one capability,
-`python.eval`, and command word `python`. `tests/component_contract.rs` validates the
+There is one component, `python-provider.wasm`, with read-only `python.eval` and a
+separate local-write `python.sqlite-eval` capability (which currently fails closed),
+and command word `python`. `tests/component_contract.rs` validates the
 decoded component imports, rejecting WASI and the old provider world.
 Componentizer adapter imports are internal to the validated component. Corresponding-source,
 SBOM and shared byte reproduction cover this combined component.
@@ -45,9 +46,9 @@ Python import hook:
 - the component imports exactly `dekopon:stdio/streams@0.1.0`,
   `dekopon:http/client@1.1.0`, `dekopon:clock/wall@1.1.0`,
   `dekopon:clock/monotonic@1.1.0`, `dekopon:random/source@0.1.0`, and
-  `dekopon:spawn/run@0.1.0`;
+  `dekopon:spawn/run@0.1.0`, and `dekopon:storage/durable-files@0.1.1`;
 - there is no WASI adapter, JavaScript/browser binding, environment, filesystem, raw socket,
-  storage, OS-subprocess, dynamic-library, or generic provider-dispatch import; the clocks and
+  OS-subprocess, dynamic-library, or generic provider-dispatch import; the clocks and
   entropy are available through broker handles; only the bounded invocation clock facade is Python-visible;
 - `allow_external_library` is false and the exact public import names are `json`, `re`, `yaml`,
   `time`, `dekopon_requests`, `dekopon_subshell`, and `dekopon_numeric` (plus
@@ -125,7 +126,7 @@ Wasmtime trap into a data envelope. Fuel exhaustion, epoch/Tokio deadline cancel
 allocation failure, and host input/output refusal remain host execution errors.
 
 An empty-linker immediate host cannot instantiate this component. Use the real broker with
-linking of the six declared interfaces and the Pi-limit evidence in
+linking of the seven declared interfaces and the Pi-limit evidence in
 `docs/deployment-profile.md`: 64 MiB per memory, 24,000,000,000 fuel, 300,000 ms timeout,
 and 12,582,912-byte input/output limits. The 10,000,000
 and 50,000,000 fuel probes intentionally fail safely during VM startup in real-host tests.
@@ -134,8 +135,10 @@ Broker defaults retain the memory/table/count and 1 MiB input/output ceilings, p
 8,000,000,000 fuel and a 30-second timeout; the Pi explicitly configures higher fuel, timeout
 and I/O ceilings. Every invocation gets a fresh
 store, async yields occur at most every `min(fuel, 10,000)` units, and Tokio applies the timeout.
-The broker linker provides the six declared interfaces; this component imports no storage.
-Grant only the intended HTTP authority and retain explicit host resource ceilings.
+The broker linker provides the seven declared interfaces. The new storage import
+is inaccessible to `python.eval`; the interim SQL capability only probes metadata and
+returns unsupported, never opens or writes the database. Do not grant it until the
+SQLite facade is completed and verified. Retain explicit host resource ceilings.
 
 A 64 MiB memory limit is per linear memory, not process RSS. The Pi configures
 `maxTotalMemoryBytes: 268435456` as an aggregate guest reservation, not an RSS bound. Compiled code, host allocations, and up to four memories sit outside

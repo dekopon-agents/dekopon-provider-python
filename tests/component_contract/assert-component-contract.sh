@@ -20,6 +20,7 @@ expected = {
     'dekopon:clock/monotonic@1.1.0',
     'dekopon:random/source@0.1.0',
     'dekopon:spawn/run@0.1.0',
+    'dekopon:storage/durable-files@0.1.1',
 }
 assert len(declarations) == len(expected) and {line.strip() for line in declarations} == {
     f'import {name};' for name in expected

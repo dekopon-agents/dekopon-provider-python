@@ -1,8 +1,8 @@
 # Dekopon Python provider
 
-A WebAssembly component with broker-granted HTTP and child-script execution exposing one
-High-risk capability:
-`python.eval`. It embeds **RustPython 0.5.0 exactly**, creates a fresh interpreter per call,
+A WebAssembly component with broker-granted HTTP and child-script execution exposing
+read-only `python.eval` and a separately authorized local-write `python.sqlite-eval`
+(which fails closed until the SQLite facade lands). It embeds **RustPython 0.5.0 exactly**, creates a fresh interpreter per call,
 captures bounded stdout in Rust, and returns only a bounded JSON-shaped result. A Dekopon shell
 reaches it through the `python` command word. Version 0.8.0 adds `dekopon_subshell` to the
 combined toolkit, pinned to the published Dekopon SDK 0.33.0. It exports `run-command` through
@@ -17,14 +17,15 @@ the current provider world.
 
 ## Broker-granted HTTP
 
-The supported release/OCI component is **`python-provider.wasm`**, exposing **`python.eval`**
-and command word **`python`**. Cargo feature `http` is default-on and keeps Dekopon-specific
+The component is **`python-provider.wasm`**, exposing **`python.eval`** and the
+interim fail-closed **`python.sqlite-eval`**, with command word **`python`**. Cargo feature `http` is default-on and keeps Dekopon-specific
 HTTP code clearly separated; disabling defaults is a developer customization, not a supported
 CI or distribution variant. Ordinary Cargo builds include `dekopon_requests`.
 The component imports exactly `dekopon:stdio/streams@0.1.0`,
 `dekopon:http/client@1.1.0`, `dekopon:clock/wall@1.1.0`,
-`dekopon:clock/monotonic@1.1.0`, `dekopon:random/source@0.1.0`, and
-`dekopon:spawn/run@0.1.0`. The broker must link all six even for pure scripts,
+`dekopon:clock/monotonic@1.1.0`, `dekopon:random/source@0.1.0`,
+`dekopon:spawn/run@0.1.0`, and `dekopon:storage/durable-files@0.1.1`.
+The broker must link all seven even for pure scripts,
 which succeed without HTTP or child-script grants.
 The public SDK Clock and Monotonic handles back Python's invocation-only `time.time()`
 and `time.monotonic()`; SQL's native entropy uses the SDK's invocation-scoped random handle. Bare empty-linker Wasmtime cannot instantiate the component.
@@ -144,7 +145,11 @@ There is no `python FILE` and no `sys.argv`: the component has no filesystem and
 takes only a script, named by `-c`, `-`, or nothing at all when stdin is piped
 in — `python <<'EOF' … EOF` matches CPython's own read of a non-tty stdin when given no file.
 The script reader bounds bytes and validates UTF-8 only after authorization; `-c` retains stdin
-as program data rather than interpreting it as script.
+as program data rather than interpreting it as script. `python sql -c CODE` (or `python sql -`
+with piped input) proposes the separate local-write `python.sqlite-eval` grant. In this interim
+2a build that capability fails closed without opening storage; the bounded `sqlite3` facade
+and persisted-row interoperability are deferred to 2b. Existing `python.eval` grants cannot
+invoke it, and `python -c` still cannot import `sqlite3`.
 
 ## Running it
 
@@ -180,7 +185,7 @@ above explicitly.
 
 ## API
 
-Input is exactly:
+Both capabilities use the same exact input shape:
 
 ```json
 {"script": "Python 3 source"}
@@ -302,7 +307,7 @@ stdlib/package compatibility, pip, or persistence.
 
 The exact component contract allows only Dekopon stdio, HTTP 1.1, wall and monotonic clocks,
 OS entropy, and spawn 0.1. There is no WASI, JS/browser, host environment, filesystem, raw
-socket, storage, OS subprocess, dynamic loading, or generic provider dispatch. Entropy is a broker import; the clocks back `time` only during invocation. Imports including `sys`, `os`, `random`, `secrets`, `socket`,
+socket, usable storage (until the 2b sqlite3 facade), OS subprocess, dynamic loading, or generic provider dispatch. Entropy is a broker import; the clocks back `time` only during invocation. Imports including `sys`, `os`, `random`, `secrets`, `socket`,
 `ssl`, `sqlite3`, `subprocess`, `threading`, `ctypes`, `tkinter`, and `webbrowser` are denied.
 `open`, `input`, and `breakpoint` are absent; guest `compile`, `eval`, and `exec` are denied.
 

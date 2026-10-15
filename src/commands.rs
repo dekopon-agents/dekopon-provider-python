@@ -1,6 +1,6 @@
 //! Pure CLI proposals: code is proposal data; a script from stdin is read after authorization.
-use crate::{COMMAND_WORD, Eval, EvalInput, PythonProvider};
-use clap::Parser;
+use crate::{COMMAND_WORD, Eval, EvalInput, PythonProvider, SqliteEval};
+use clap::{Parser, Subcommand};
 use dekopon_provider_sdk::provider::{Proposal, Usage};
 
 #[cfg(feature = "http")]
@@ -51,7 +51,7 @@ pub(crate) const ABOUT: &str =
     name = COMMAND_WORD,
     version,
     about = ABOUT,
-    override_usage = "python -c <CODE>\n       python - <<'EOF'\n       python <<'EOF'",
+    override_usage = "python -c <CODE>\n       python - <<'EOF'\n       python <<'EOF'\n       python sql -c <CODE>",
     after_help = format!("{AFTER_HELP}\n{TABLES_HELP}"),
     group = clap::ArgGroup::new("script").args(["code", "piped"]),
 )]
@@ -62,20 +62,46 @@ pub struct Python {
     /// Read the script from the value piped into the word
     #[arg(value_name = "-", value_parser = ["-"], hide_possible_values = true)]
     piped: Option<String>,
+    /// Propose a separately authorized persistent-SQL script
+    #[command(subcommand)]
+    command: Option<PythonCommand>,
+}
+
+#[derive(Subcommand)]
+enum PythonCommand {
+    /// Persistent SQL (requires python.sqlite-eval; unavailable until the sqlite3 facade is built)
+    Sql {
+        /// Run CODE as the SQL-capable Python script
+        #[arg(short = 'c', value_name = "CODE", allow_hyphen_values = true)]
+        code: Option<String>,
+        /// Read the SQL-capable script from stdin
+        #[arg(value_name = "-", value_parser = ["-"], hide_possible_values = true)]
+        piped: Option<String>,
+    },
 }
 
 pub(crate) fn propose(args: Python, stdin_piped: bool) -> Result<Proposal<PythonProvider>, Usage> {
-    let (script, stdin_script) = match (args.code, args.piped) {
+    let sql = args.command.is_some();
+    let (code, piped) = match args.command {
+        Some(PythonCommand::Sql { code, piped }) => (code, piped),
+        None => (args.code, args.piped),
+    };
+    let (script, stdin_script) = match (code, piped) {
         (Some(code), None) => (code, false),
         (None, Some(_)) if stdin_piped => (String::new(), true),
         (None, Some(_)) => return Err(Usage::new("python -: nothing was piped in")),
         (None, None) if stdin_piped => (String::new(), true),
         _ => return Err(Usage::new("python takes `-c <CODE>` or `-`")),
     };
-    Ok(Proposal::to::<Eval>(EvalInput {
+    let input = EvalInput {
         script,
         stdin_script,
-    }))
+    };
+    Ok(if sql {
+        Proposal::to::<SqliteEval>(input)
+    } else {
+        Proposal::to::<Eval>(input)
+    })
 }
 
 #[cfg(test)]
@@ -115,15 +141,44 @@ mod tests {
             json!({"script":"result = 42"})
         );
         assert_eq!(proposed(&["-c", "-1"], true), json!({"script":"-1"}));
+        let CommandRunOutcome::Proposed {
+            capability, input, ..
+        } = command(&["sql", "-c", "import sqlite3"], false)
+        else {
+            panic!("sql must propose")
+        };
+        assert_eq!(capability.as_str(), "python.sqlite-eval");
+        assert_eq!(input, json!({"script":"import sqlite3"}));
+        let CommandRunOutcome::Proposed {
+            capability, input, ..
+        } = command(&["sql", "-"], true)
+        else {
+            panic!("sql stdin must propose")
+        };
+        assert_eq!(capability.as_str(), "python.sqlite-eval");
+        assert_eq!(input, json!({"script":"", "stdin_script":true}));
     }
     #[test]
     fn declined_inputs_and_help_are_safe() {
-        for args in [&["-c"][..], &["script.py"], &["-c", "x", "-"]] {
-            assert!(matches!(
-                command(args, false),
-                CommandRunOutcome::Rendered { status: 2, .. }
-            ));
+        for args in [
+            &["-c"][..],
+            &["script.py"],
+            &["-c", "x", "-"],
+            &["sql", "file.py"],
+        ] {
+            assert!(
+                matches!(
+                    command(args, false),
+                    CommandRunOutcome::Rendered { status: 2, .. }
+                ),
+                "{args:?}: {:?}",
+                command(args, false)
+            );
         }
+        assert!(matches!(
+            command(&["sql", "-c", "x", "-"], false),
+            CommandRunOutcome::Failed { .. }
+        ));
         assert!(matches!(
             command(&["-"], false),
             CommandRunOutcome::Failed { .. }
@@ -142,6 +197,7 @@ mod tests {
             "{stdout}"
         );
         for phrase in [
+            "sql",
             "RustPython 0.5.0",
             "dekopon_numeric",
             "time (wall/monotonic)",

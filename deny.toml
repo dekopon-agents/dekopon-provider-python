@@ -76,4 +76,6 @@ unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 allow-git = [
   "https://github.com/dekopon-agents/datafusion.git",
+  "https://github.com/dekopon-agents/dekopon-provider-turso-sql",
+  "https://github.com/dekopon-agents/turso",
 ]
