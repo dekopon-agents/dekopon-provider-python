@@ -310,7 +310,8 @@ keys, multiple documents, non-finite/out-of-range numbers, and excess size/depth
 alias expansion. Timestamp-looking plain scalars such as `2025-02-03` remain strings.
 
 This is RustPython 0.5.0 with the tested module/value subset, not CPython conformance, arbitrary
-stdlib/package compatibility, pip, or persistence.
+stdlib/package compatibility or pip. `python.eval` is read-only and has no persistence;
+separately granted `python.sqlite-eval` persists bounded SQL in broker-owned `main.db`.
 
 ## Denied authority and determinism
 
@@ -329,7 +330,7 @@ deadline, memory, admission, and container limits are mandatory.
 See [SECURITY.md](SECURITY.md) for the complete provider/host split and
 [docs/deployment-profile.md](docs/deployment-profile.md) for artifact size, import contract and broker memory evidence. Per-memory limits are not process
 RSS; the owner's Pi deployment limits remain a separate decision. A script gets no generic
-provider dispatch, registry lookup, proposal submission, persistence, or privileged imports. Child shell scripts are available only through the scoped spawn handle
+provider dispatch, registry lookup, proposal submission, arbitrary persistence, or privileged imports. Only a separately granted `python.sqlite-eval` script may persist bounded SQL. Child shell scripts are available only through the scoped spawn handle
 and the host's existing authority.
 
 ## Validation

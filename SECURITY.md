@@ -50,10 +50,13 @@ Python import hook:
 - there is no WASI adapter, JavaScript/browser binding, environment, filesystem, raw socket,
   OS-subprocess, dynamic-library, or generic provider-dispatch import; the clocks and
   entropy are available through broker handles; only the bounded invocation clock facade is Python-visible;
-- `allow_external_library` is false and the exact public import names are `json`, `re`, `yaml`,
-  `time`, `dekopon_requests`, `dekopon_subshell`, and `dekopon_numeric` (plus
-  `dekopon_tables` only with the optional `tables` feature); private
-  dependency modules are preloaded below the guest-visible import guard;
+- `allow_external_library` is false. `python.eval` exposes exactly `json`, `re`, `yaml`,
+  `time`, `math`, `collections`, `itertools`, `functools`, `decimal`, `fractions`, `csv`,
+  in-memory `io`, `base64`, and `dekopon_numeric`; `dekopon_requests` and
+  `dekopon_subshell` require the `http` build feature, while `dekopon_tables` requires
+  the optional `tables` feature. Separately granted `python.sqlite-eval` adds `sqlite3`
+  only in its own interpreter (and retains the same built imports); private dependency
+  modules are preloaded below the guest-visible import guard;
 - `open`, `input`, `breakpoint`, `compile`, `eval`, and `exec` are removed after trusted frozen
   modules are preloaded; no original privileged callable is retained on a Python-reachable object;
 - the Python-visible module registry is replaced with the built public modules, and denied
@@ -61,7 +64,8 @@ Python import hook:
 - `sys`, `os`, `pathlib`, `random`, `secrets`, `socket`, `ssl`, `subprocess` (`sqlite3` remains denied under `python.eval`),
   `threading`, `ctypes`, `tkinter`, and `webbrowser` are denied;
 - the `python` command word's `run-command` export only parses argv. It renders help and usage
-  errors, or returns a `python.eval` proposal that the host authorizes exactly like a direct call;
+  errors, or returns a `python.eval` proposal (or `python.sqlite-eval` for `python sql`)
+  that the host authorizes exactly like a direct call;
   it constructs no VM and grants nothing. Bare/`-` proposals carry only an stdin marker; the
   capability reads at most 65,537 script bytes after broker authorization. HTTP and spawn callbacks
   access invocation-scoped handles, which drop guards clear on all exits.

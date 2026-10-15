@@ -2,18 +2,26 @@
 use dekopon_broker_host_shared::{
     BrokerHostLimits, BrokerProviderRegistry, Streams, asset::AssetInputs,
 };
+use dekopon_broker_shared::{
+    Broker, BrokerBuildError, BrokerLimits, ConstraintCatalog, ConstraintSet, CredentialStore,
+    IdentityDirectory, InMemoryAuditLog, PolicyEngine, PolicyWorld,
+};
 use dekopon_capability_shared::{
-    ExecutionConstraints, ProposedInvocation, StorageAccess, StorageConstraints, StorageInterface,
-    StorageScope, broker::AuthorizationGate,
+    EffectKind, ExecutionConstraints, ProposedInvocation, StorageAccess, StorageConstraints,
+    StorageInterface, StorageScope, broker::AuthorizationGate,
 };
 use dekopon_core_shared::{
-    Actor, AgentId, CapabilityId, ExternalSubject, InvocationId, PrincipalId, ProviderId, TraceId,
+    Actor, AgentId, CapabilityId, ExternalSubject, InvocationId, PrincipalId, ProviderId,
+    RiskLevel, TraceId,
 };
 use dekopon_storage_host_shared::{
     ContinuityPolicy, StorageGrant, StorageGrantRequest, StorageHost, StorageLimits,
 };
 use serde_json::{Value, json};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{
+    Arc,
+    atomic::{AtomicU64, Ordering},
+};
 static INVOCATION: AtomicU64 = AtomicU64::new(0);
 
 fn path(name: &str) -> std::path::PathBuf {
@@ -27,6 +35,22 @@ fn grant(
     id: InvocationId,
     capability: CapabilityId,
     provider: ProviderId,
+) -> StorageGrant {
+    grant_in_namespace(
+        host,
+        id,
+        capability,
+        provider,
+        Some("turso".parse().unwrap()),
+    )
+}
+
+fn grant_in_namespace(
+    host: &StorageHost,
+    id: InvocationId,
+    capability: CapabilityId,
+    provider: ProviderId,
+    namespace: Option<ProviderId>,
 ) -> StorageGrant {
     host.grant(
         StorageGrantRequest::new(
@@ -47,7 +71,7 @@ fn grant(
             ContinuityPolicy::Stable,
             b"same-authority".to_vec(),
         )
-        .with_shared_namespace(Some("turso".parse::<ProviderId>().unwrap())),
+        .with_shared_namespace(namespace),
     )
     .expect("stable shared storage grant")
 }
@@ -127,6 +151,25 @@ async fn call(
     capability: &str,
     input: Value,
 ) -> Result<Value, String> {
+    call_in_namespace(
+        registry,
+        host,
+        provider,
+        capability,
+        input,
+        Some("turso".parse().unwrap()),
+    )
+    .await
+}
+
+async fn call_in_namespace(
+    registry: &BrokerProviderRegistry,
+    host: &StorageHost,
+    provider: &str,
+    capability: &str,
+    input: Value,
+    namespace: Option<ProviderId>,
+) -> Result<Value, String> {
     let id: InvocationId = format!(
         "shared-sql-test-{}",
         INVOCATION.fetch_add(1, Ordering::Relaxed)
@@ -136,9 +179,14 @@ async fn call(
     let capability: CapabilityId = capability.parse().unwrap();
     let provider: ProviderId = provider.parse().unwrap();
     let agent: AgentId = "storage-test-agent".parse().unwrap();
-    let namespace: ProviderId = "turso".parse().unwrap();
     let scope = StorageScope::Agent;
-    let grant = grant(host, id.clone(), capability.clone(), provider.clone());
+    let grant = grant_in_namespace(
+        host,
+        id.clone(),
+        capability.clone(),
+        provider.clone(),
+        namespace.clone(),
+    );
     let proposed = ProposedInvocation::new(
         id,
         capability,
@@ -155,7 +203,7 @@ async fn call(
             access: StorageAccess::ReadWrite,
             scope,
             retention: Default::default(),
-            namespace: Some(namespace),
+            namespace,
         }),
         secret_use: None,
     };
@@ -191,6 +239,185 @@ async fn call(
     let bytes = captured.join().unwrap().map_err(|e| e.to_string())?;
     invoked.map_err(|e| format!("invoke: {e}"))?;
     serde_json::from_slice(&bytes).map_err(|e| format!("output: {e}; bytes={bytes:?}"))
+}
+
+fn storage_set(
+    provider: &str,
+    interface: StorageInterface,
+    scope: StorageScope,
+    namespace: Option<&str>,
+) -> ConstraintSet {
+    ConstraintSet {
+        default_secret_use: None,
+        route: Default::default(),
+        provider: provider.parse().unwrap(),
+        effect: EffectKind::LocalWrite,
+        risk: if provider == "python" {
+            RiskLevel::High
+        } else {
+            RiskLevel::Medium
+        },
+        credential: None,
+        constraints: ExecutionConstraints {
+            storage: Some(StorageConstraints {
+                interface,
+                access: StorageAccess::ReadWrite,
+                scope,
+                retention: Default::default(),
+                namespace: namespace.map(|name| name.parse().unwrap()),
+            }),
+            ..Default::default()
+        },
+    }
+}
+
+fn broker_load(
+    registry: BrokerProviderRegistry,
+    python: ConstraintSet,
+    turso: ConstraintSet,
+) -> Result<Broker<InMemoryAuditLog>, BrokerBuildError> {
+    let world = PolicyWorld::new(
+        ["test-peer".parse().unwrap()],
+        registry
+            .capabilities()
+            .map(|(provider, capability)| (capability.id.clone(), provider.clone())),
+    )
+    .unwrap();
+    Broker::new(
+        registry,
+        "test-broker".parse().unwrap(),
+        "namespace-policy".to_owned(),
+        PolicyEngine::new("", &world).unwrap(),
+        ConstraintCatalog::new([
+            ("python.sqlite-eval".parse().unwrap(), python),
+            ("turso.exec".parse().unwrap(), turso),
+        ])
+        .unwrap(),
+        CredentialStore::empty(),
+        IdentityDirectory::empty(),
+        Arc::new(InMemoryAuditLog::new(4).unwrap()),
+        BrokerLimits::default(),
+    )
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn broker_config_load_checks_local_null_invalid_and_conflicting_namespaces() {
+    let root = tempfile::tempdir().unwrap();
+    let host = StorageHost::open(
+        root.path().canonicalize().unwrap().join("storage"),
+        StorageLimits::default(),
+    )
+    .unwrap();
+    let sources = || {
+        [
+            path("DEKOPON_PROVIDER_COMPONENT"),
+            path("DEKOPON_TURSO_COMPONENT"),
+        ]
+    };
+    let load = || {
+        BrokerProviderRegistry::load_with_storage(
+            sources(),
+            BrokerHostLimits::default(),
+            Some(host.clone()),
+        )
+    };
+    let options = |namespace: Value| {
+        serde_json::from_value::<StorageConstraints>(json!({
+        "interface":"durable-files", "access":"read-write", "scope":"agent", "namespace":namespace,
+    })).unwrap()
+    };
+    let absent: StorageConstraints = serde_json::from_value(json!({
+        "interface":"durable-files", "access":"read-write", "scope":"agent",
+    }))
+    .unwrap();
+    assert_eq!(absent.namespace, None);
+    assert_eq!(options(Value::Null).namespace, None);
+    for malformed in [json!(42), json!(""), json!("bad namespace")] {
+        assert!(serde_json::from_value::<StorageConstraints>(json!({
+            "interface":"durable-files", "access":"read-write", "scope":"agent", "namespace":malformed,
+        })).is_err(), "invalid owner namespace must not parse");
+    }
+    assert!(
+        broker_load(
+            load().await.unwrap(),
+            storage_set(
+                "python",
+                StorageInterface::DurableFiles,
+                StorageScope::Agent,
+                None
+            ),
+            storage_set(
+                "turso",
+                StorageInterface::DurableFiles,
+                StorageScope::Agent,
+                None
+            ),
+        )
+        .is_ok(),
+        "both provider-local configurations load"
+    );
+    let python = |scope, interface| storage_set("python", interface, scope, Some("turso"));
+    assert!(
+        matches!(
+            broker_load(
+                load().await.unwrap(),
+                python(
+                    StorageScope::PrivateConversation,
+                    StorageInterface::DurableFiles
+                ),
+                storage_set(
+                    "turso",
+                    StorageInterface::DurableFiles,
+                    StorageScope::Agent,
+                    None
+                ),
+            ),
+            Err(BrokerBuildError::ConflictingStorageNamespaces { .. })
+        ),
+        "named namespace at conversation scope must refuse at broker load"
+    );
+    assert!(
+        matches!(
+            broker_load(
+                load().await.unwrap(),
+                python(StorageScope::Agent, StorageInterface::Jsonl),
+                storage_set(
+                    "turso",
+                    StorageInterface::DurableFiles,
+                    StorageScope::Agent,
+                    None
+                ),
+            ),
+            Err(BrokerBuildError::ConflictingStorageNamespaces { .. })
+        ),
+        "mixed interfaces must refuse at broker load"
+    );
+    let python_script = |script: &str| json!({"script":script});
+    let registry = load().await.unwrap();
+    let written = call_in_namespace(&registry, &host, "python", "python.sqlite-eval",
+        python_script("import sqlite3\nc=sqlite3.connect()\nc.execute('CREATE TABLE local_note(v TEXT)')\nc.execute(\"INSERT INTO local_note VALUES ('provider-local')\")\nc.commit()\nc.close()"), absent.namespace.clone()).await.unwrap();
+    assert_eq!(written["ok"], true, "{written}");
+    let read_null = call_in_namespace(&registry, &host, "python", "python.sqlite-eval",
+        python_script("import sqlite3\nc=sqlite3.connect()\nresult=c.execute('SELECT v FROM local_note').fetchone()\nc.close()"), options(Value::Null).namespace).await.unwrap();
+    assert_eq!(
+        read_null["result"],
+        json!(["provider-local"]),
+        "{read_null}"
+    );
+    let turso_read = call(
+        &registry,
+        &host,
+        "turso",
+        "turso.exec",
+        json!({"statements":["SELECT name FROM sqlite_master WHERE name='local_note'"]}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        turso_read["results"][0]["rows"],
+        json!([]),
+        "null/absent unexpectedly shared Turso storage: {turso_read}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]

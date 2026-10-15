@@ -44,6 +44,7 @@ yaml-rust2 = { version = "=0.12.0", default-features = false }
 dekopon-broker-host = "=0.33.0"
 dekopon-provider-sdk-testkit = "=0.33.0"
 dekopon-broker-host-shared = { package = "dekopon-broker-host", version = "=0.47.0" }
+dekopon-broker-shared = { package = "dekopon-broker", version = "=0.47.0" }
 dekopon-capability-shared = { package = "dekopon-capability", version = "=0.47.0" }
 dekopon-core-shared = { package = "dekopon-core", version = "=0.47.0" }
 dekopon-storage-host-shared = { package = "dekopon-storage-host", version = "=0.47.0" }
