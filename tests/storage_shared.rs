@@ -10,7 +10,7 @@ use dekopon_core_shared::{
     Actor, AgentId, CapabilityId, ExternalSubject, InvocationId, PrincipalId, ProviderId, TraceId,
 };
 use dekopon_storage_host_shared::{
-    ContinuityPolicy, StorageGrantRequest, StorageHost, StorageLimits,
+    ContinuityPolicy, StorageGrant, StorageGrantRequest, StorageHost, StorageLimits,
 };
 use serde_json::{Value, json};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -20,6 +20,104 @@ fn path(name: &str) -> std::path::PathBuf {
     std::env::var_os(name)
         .unwrap_or_else(|| panic!("{name} required for built-component storage test"))
         .into()
+}
+
+fn grant(
+    host: &StorageHost,
+    id: InvocationId,
+    capability: CapabilityId,
+    provider: ProviderId,
+) -> StorageGrant {
+    host.grant(
+        StorageGrantRequest::new(
+            id,
+            capability,
+            provider,
+            StorageInterface::DurableFiles,
+            StorageAccess::ReadWrite,
+            StorageScope::Agent,
+            "storage-test-agent".parse::<AgentId>().unwrap(),
+            "slack.t0123abc.u99999999"
+                .parse::<ExternalSubject>()
+                .unwrap(),
+            "slack",
+            "testkit-transport",
+            "c0123abc",
+            "c0123abc:1712345678.000100",
+            ContinuityPolicy::Stable,
+            b"same-authority".to_vec(),
+        )
+        .with_shared_namespace(Some("turso".parse::<ProviderId>().unwrap())),
+    )
+    .expect("stable shared storage grant")
+}
+
+// Every physical data token must correspond to one of the fixed database or its
+// engine-managed WAL sidecars. vfs_stat resolves names without creating a file.
+fn namespace_objects(host: &StorageHost, root: &std::path::Path) -> Vec<String> {
+    fn data_files(path: &std::path::Path, found: &mut Vec<String>) {
+        for entry in std::fs::read_dir(path).unwrap() {
+            let entry = entry.unwrap();
+            if entry.file_type().unwrap().is_dir() {
+                if entry.file_name() == "data" {
+                    found.extend(
+                        std::fs::read_dir(entry.path())
+                            .unwrap()
+                            .map(|file| file.unwrap().file_name().to_string_lossy().into_owned()),
+                    );
+                } else {
+                    data_files(&entry.path(), found);
+                }
+            }
+        }
+    }
+    let id: InvocationId = format!("inspect-sql-{}", INVOCATION.fetch_add(1, Ordering::Relaxed))
+        .parse()
+        .unwrap();
+    let mut handle = host
+        .begin(grant(
+            host,
+            id,
+            "turso.exec".parse().unwrap(),
+            "turso".parse().unwrap(),
+        ))
+        .unwrap();
+    let names = ["main.db", "main.db-wal", "main.db-shm"];
+    let allowed = names
+        .iter()
+        .filter(|name| handle.vfs_stat(name).unwrap().is_some())
+        .count();
+    handle.abort();
+    let mut found = Vec::new();
+    data_files(&root.join("namespaces"), &mut found);
+    found.sort();
+    assert_eq!(
+        found.len(),
+        allowed,
+        "unexpected durable object beside fixed main.db/WAL sidecars: {found:?}"
+    );
+    assert!(handle_main_exists(host), "main.db must have been opened");
+    found
+}
+
+fn handle_main_exists(host: &StorageHost) -> bool {
+    let id: InvocationId = format!(
+        "inspect-main-{}",
+        INVOCATION.fetch_add(1, Ordering::Relaxed)
+    )
+    .parse()
+    .unwrap();
+    let mut handle = host
+        .begin(grant(
+            host,
+            id,
+            "turso.exec".parse().unwrap(),
+            "turso".parse().unwrap(),
+        ))
+        .unwrap();
+    let exists = handle.vfs_stat("main.db").unwrap().is_some();
+    handle.abort();
+    exists
 }
 
 async fn call(
@@ -40,29 +138,7 @@ async fn call(
     let agent: AgentId = "storage-test-agent".parse().unwrap();
     let namespace: ProviderId = "turso".parse().unwrap();
     let scope = StorageScope::Agent;
-    let grant = host
-        .grant(
-            StorageGrantRequest::new(
-                id.clone(),
-                capability.clone(),
-                provider.clone(),
-                StorageInterface::DurableFiles,
-                StorageAccess::ReadWrite,
-                scope,
-                agent.clone(),
-                "slack.t0123abc.u99999999"
-                    .parse::<ExternalSubject>()
-                    .unwrap(),
-                "slack",
-                "testkit-transport",
-                "c0123abc",
-                "c0123abc:1712345678.000100",
-                ContinuityPolicy::Stable,
-                b"same-authority".to_vec(),
-            )
-            .with_shared_namespace(Some(namespace.clone())),
-        )
-        .map_err(|e| format!("storage grant: {e}"))?;
+    let grant = grant(host, id.clone(), capability.clone(), provider.clone());
     let proposed = ProposedInvocation::new(
         id,
         capability,
@@ -192,18 +268,65 @@ async fn built_python_and_turso_cross_read_persisted_rows_both_directions() {
             "unknown/null input must refuse"
         );
     }
-    for arg in ["'main.db'", "None", "'file:main.db?mode=rw'"] {
-        let p = run(
-            "python",
-            "python.sqlite-eval",
-            python(&format!("import sqlite3\nsqlite3.connect({arg})")),
+    let storage_root = root.path().canonicalize().unwrap().join("storage");
+    for (name, arg) in [
+        ("path", "'main.db'"),
+        ("null", "None"),
+        ("uri", "'file:main.db?mode=rw'"),
+        ("memory", "':memory:'"),
+    ] {
+        let before = namespace_objects(&host, &storage_root);
+        let p = run("python", "python.sqlite-eval", python(&format!(
+            "import sqlite3\nc=sqlite3.connect({arg})\nc.execute('CREATE TABLE refused_{name}(v)')\nc.execute(\"INSERT INTO note (body) VALUES ('refused')\")\nc.commit()",
+        ))).await.unwrap();
+        assert_eq!(p["error"]["type"], "TypeError", "{name}: {p}");
+        assert_eq!(
+            namespace_objects(&host, &storage_root),
+            before,
+            "{name} created a durable object"
+        );
+        let unchanged = run(
+            "turso",
+            "turso.exec",
+            turso(&[
+                "SELECT count(*) FROM note",
+                &format!("SELECT count(*) FROM sqlite_master WHERE name='refused_{name}'"),
+            ]),
         )
         .await
         .unwrap();
-        assert_eq!(p["error"]["type"], "TypeError", "{p}");
+        assert_eq!(
+            unchanged["results"][0]["rows"][0][0], 10,
+            "{name}: {unchanged}"
+        );
+        assert_eq!(
+            unchanged["results"][1]["rows"][0][0], 0,
+            "{name}: {unchanged}"
+        );
     }
+    let before = namespace_objects(&host, &storage_root);
+    let closed = run("python", "python.sqlite-eval", python(
+        "import sqlite3\nc=sqlite3.connect()\nc.close()\nc.execute('CREATE TABLE refused_closed(v)')\nc.execute(\"INSERT INTO note (body) VALUES ('refused')\")",
+    )).await.unwrap();
+    assert_eq!(closed["error"]["type"], "ProgrammingError", "{closed}");
+    assert_eq!(
+        namespace_objects(&host, &storage_root),
+        before,
+        "use-after-close created a durable object"
+    );
+    let unchanged = run(
+        "turso",
+        "turso.exec",
+        turso(&[
+            "SELECT count(*) FROM note",
+            "SELECT count(*) FROM sqlite_master WHERE name='refused_closed'",
+        ]),
+    )
+    .await
+    .unwrap();
+    assert_eq!(unchanged["results"][0]["rows"][0][0], 10, "{unchanged}");
+    assert_eq!(unchanged["results"][1]["rows"][0][0], 0, "{unchanged}");
     for script in [
-        "c.close()\nc.execute('SELECT 1')",
         "cursor=c.execute('SELECT 1')\nc.close()\ncursor.fetchone()",
         "c.execute('SELECT 1; SELECT 2')",
         "c.execute('SELECT ?', (object(),))",

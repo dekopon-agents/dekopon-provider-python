@@ -39,7 +39,24 @@ pub(crate) fn active() -> bool {
 #[rustpython_vm::pymodule(name = "sqlite3")]
 pub(crate) mod sqlite_module {
     use super::*;
-    use rustpython_vm::{TryFromObject, builtins::PyTupleRef};
+    use rustpython_vm::{
+        TryFromObject,
+        builtins::{PyTupleRef, PyTypeRef},
+    };
+
+    #[pyattr(name = "ProgrammingError", once)]
+    fn programming_error(vm: &VirtualMachine) -> PyTypeRef {
+        crate::exception::immutable_exception_type(
+            vm,
+            "sqlite3",
+            "ProgrammingError",
+            vm.ctx.exceptions.exception_type.to_owned(),
+        )
+    }
+
+    fn closed_error(vm: &VirtualMachine) -> rustpython_vm::builtins::PyBaseExceptionRef {
+        vm.new_exception_msg(programming_error(vm), "connection closed".into())
+    }
 
     #[pyattr]
     #[pyclass(module = "sqlite3", name = "Connection")]
@@ -181,7 +198,7 @@ pub(crate) mod sqlite_module {
     impl SqlConnection {
         fn ensure_open(&self, vm: &VirtualMachine) -> PyResult<()> {
             if self.closed.get() {
-                Err(vm.new_value_error("connection closed"))
+                Err(closed_error(vm))
             } else {
                 self.connection(vm).map(|_| ())
             }
@@ -215,7 +232,7 @@ pub(crate) mod sqlite_module {
         #[pymethod]
         fn fetchone(&self, vm: &VirtualMachine) -> PyResult<rustpython_vm::PyObjectRef> {
             if self.closed.get() {
-                return Err(vm.new_value_error("connection closed"));
+                return Err(closed_error(vm));
             }
             let mut index = self.index.borrow_mut();
             let rows = self.rows.borrow();
@@ -234,7 +251,7 @@ pub(crate) mod sqlite_module {
         #[pymethod]
         fn fetchall(&self, vm: &VirtualMachine) -> PyResult<rustpython_vm::PyObjectRef> {
             if self.closed.get() {
-                return Err(vm.new_value_error("connection closed"));
+                return Err(closed_error(vm));
             }
             let mut index = self.index.borrow_mut();
             let rows = self.rows.borrow();
