@@ -17,6 +17,7 @@ a linear-memory bound, and a per-memory cap is not a container-RSS or aggregate-
 | `dekopon:clock/monotonic@1.1.0` | invocation-only SDK monotonic clock (`time.monotonic()`) |
 | `dekopon:random/source@0.1.0` | invocation-scoped SDK OS entropy |
 | `dekopon:spawn/run@0.1.0` | invocation-scoped `dekopon_subshell` child scripts |
+| `dekopon:storage/durable-files@0.1.1` | separately authorized SQL capability; interim metadata probe only, no open or write |
 
 No WASI, OS process or socket import is present. The separate fail-closed
 `python.sqlite-eval` capability adds a durable-files import, but `python.eval`

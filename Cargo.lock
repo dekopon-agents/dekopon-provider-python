@@ -1998,6 +1998,7 @@ version = "0.8.0"
 dependencies = [
  "clap",
  "datafusion",
+ "dekopon-broker-host",
  "dekopon-provider-sdk",
  "dekopon-provider-sdk-testkit",
  "dekopon-turso-sql-io",

@@ -175,12 +175,12 @@ impl Capability for SqliteEval {
     type Error = PythonError;
 
     fn run(input: Self::Input, needs: Self::Needs, _out: &mut Stdout) -> Result<(), Self::Error> {
-        if input.script.len() > SCRIPT_BYTES || input.stdin_script && !input.script.is_empty() {
-            return Err(PythonError::new(
-                Code::INVALID_INPUT,
-                "invalid SQL script input",
-            ));
-        }
+        let pipe = if input.stdin_script {
+            provider::stdin()
+        } else {
+            None
+        };
+        let _script = validate_sql_script(input, pipe)?;
         // Materialize the declared durable-files import in the built component. This
         // read-only probe neither opens nor creates the database; S2b replaces it
         // with the shared adapter's with_database entry point.
@@ -189,6 +189,64 @@ impl Capability for SqliteEval {
             Code::new("unsupported"),
             "sqlite3 is not available in this build",
         ))
+    }
+}
+
+// Validation is deliberately independent of the storage handle: even an ungranted
+// storage host must see the input error before any durable-files import is called.
+fn validate_sql_script(
+    mut input: EvalInput,
+    pipe: Option<impl Read>,
+) -> Result<String, PythonError> {
+    if input.stdin_script {
+        if !input.script.is_empty() {
+            return Err(PythonError::new(
+                Code::INVALID_INPUT,
+                "stdin script cannot contain inline code",
+            ));
+        }
+        let mut raw = Vec::new();
+        pipe.ok_or_else(|| {
+            PythonError::new(Code::INVALID_INPUT, "python sql -: nothing was piped in")
+        })?
+        .take((SCRIPT_BYTES + 1) as u64)
+        .read_to_end(&mut raw)
+        .map_err(|_| PythonError::new(Code::INVALID_INPUT, "python sql -: invalid piped script"))?;
+        if raw.len() > SCRIPT_BYTES {
+            return Err(PythonError::new(
+                Code::INVALID_INPUT,
+                "script exceeds UTF-8 byte limit",
+            ));
+        }
+        input.script = String::from_utf8(raw).map_err(|_| {
+            PythonError::new(Code::INVALID_INPUT, "python sql -: invalid UTF-8 script")
+        })?;
+    }
+    if input.script.len() > SCRIPT_BYTES {
+        return Err(PythonError::new(
+            Code::INVALID_INPUT,
+            "script exceeds UTF-8 byte limit",
+        ));
+    }
+    Ok(input.script)
+}
+
+#[cfg(test)]
+mod sql_input_tests {
+    use super::{EvalInput, validate_sql_script};
+    use dekopon_provider_sdk::provider::{Code, Failure};
+    use std::io::Cursor;
+
+    #[test]
+    fn invalid_piped_sql_returns_typed_invalid_input_before_storage() {
+        let input = || EvalInput {
+            script: String::new(),
+            stdin_script: true,
+        };
+        for pipe in [None, Some(vec![b'x'; 65_537]), Some(vec![0xff])] {
+            let result = validate_sql_script(input(), pipe.map(Cursor::new));
+            assert_eq!(result.unwrap_err().code(), Code::INVALID_INPUT);
+        }
     }
 }
 

@@ -1,5 +1,7 @@
 //! Real-component, authorized invocation and pure CLI proposal witnesses.
+use dekopon_broker_host::BrokerHostError;
 use dekopon_provider_sdk::{CommandRunOutcome, provider};
+use dekopon_provider_sdk_testkit::HarnessError;
 use dekopon_provider_sdk_testkit::{Harness, Native, conformance};
 use dekopon_python_provider::PythonProvider;
 use serde_json::{Value, json};
@@ -105,11 +107,12 @@ fn sql_grant_cannot_expand_old_eval_and_unfinished_facade_fails_closed() {
     assert_eq!(answer(&old.stdout)["error"]["type"], "ImportError");
     // The published testkit supplies no durable-files grant. A real component
     // must be rejected by its host rather than silently executing the script.
-    assert!(
+    assert!(matches!(
         Harness::<PythonProvider>::get(&path)
-            .call("python.sqlite-eval", json!({"script":"import sqlite3"}))
-            .is_err()
-    );
+            .call("python.sqlite-eval", json!({"script":"import sqlite3"})),
+        Err(HarnessError::Invocation(failure))
+            if matches!(*failure.error, BrokerHostError::StorageCallRejected { reason: "disabled", .. })
+    ));
     for input in [
         json!({"script":"", "filename":"main.db"}),
         json!({"script":null}),
@@ -119,12 +122,36 @@ fn sql_grant_cannot_expand_old_eval_and_unfinished_facade_fails_closed() {
         let rejected = Harness::<PythonProvider>::get(&path)
             .call("python.sqlite-eval", input)
             .expect("schema refusal precedes the unavailable storage call");
-        assert_ne!(rejected.status, 0);
+        assert_eq!(rejected.status, 2);
     }
+    // The published native testkit cannot install a storage handle, but it can
+    // check that input schema refusal is dispatched before acquiring Needs.
     let native = Native::<PythonProvider>::new();
-    let rejected = native.call("python.sqlite-eval", &json!({"script":""}).to_string());
-    assert_ne!(rejected.status, 0);
-    assert!(native.requests().is_empty());
+    let rejected = native.call("python.sqlite-eval", &json!({"script":null}).to_string());
+    assert_eq!(rejected.status, 2);
+    let needs_component = native.call("python.sqlite-eval", &json!({"script":"pass"}).to_string());
+    assert_eq!(
+        needs_component.status,
+        provider::Code::COMPONENT_HARNESS_REQUIRED.status().get()
+    );
+}
+
+#[test]
+fn bad_piped_sql_is_refused_before_disabled_storage_import() {
+    let path = component();
+    for pipe in [None, Some(vec![b'x'; 65_537]), Some(vec![0xff])] {
+        let mut run = Harness::<PythonProvider>::get(&path);
+        if let Some(pipe) = pipe {
+            run = run.stdin(pipe);
+        }
+        let output = run
+            .call(
+                "python.sqlite-eval",
+                json!({"script":"", "stdin_script":true}),
+            )
+            .expect("invalid-input wins over rejected storage call");
+        assert_eq!(output.status, 2, "{}", output.stderr);
+    }
 }
 
 #[test]
