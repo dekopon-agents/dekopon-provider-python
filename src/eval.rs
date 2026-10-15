@@ -46,9 +46,17 @@ impl ErrorDetail {
 }
 
 pub(crate) fn evaluate(script: &str) -> Value {
+    evaluate_with_sql(script, false)
+}
+
+pub(crate) fn evaluate_sql(script: &str) -> Value {
+    evaluate_with_sql(script, true)
+}
+
+fn evaluate_with_sql(script: &str, sql: bool) -> Value {
     capture::reset();
-    let interpreter = interpreter();
-    let execution = interpreter.enter(|vm| execute(script, vm));
+    let interpreter = interpreter_with_sql(sql);
+    let execution = interpreter.enter(|vm| execute(script, vm, sql));
     let captured = capture::snapshot();
     let value = match execution {
         Ok(result) => serde_json::to_value(Success {
@@ -68,7 +76,12 @@ pub(crate) fn evaluate(script: &str) -> Value {
     enforce_response_limit(value)
 }
 
+#[cfg(test)]
 pub(crate) fn interpreter() -> Interpreter {
+    interpreter_with_sql(false)
+}
+
+fn interpreter_with_sql(sql: bool) -> Interpreter {
     let mut settings = Settings::default();
     settings.isolated = true;
     settings.ignore_environment = true;
@@ -93,6 +106,9 @@ pub(crate) fn interpreter() -> Interpreter {
         crate::time::time_module::module_def(&builder.ctx),
         crate::yaml::yaml_module::module_def(&builder.ctx),
     ]);
+    if sql {
+        definitions.push(crate::sqlite::sqlite_module::module_def(&builder.ctx));
+    }
     #[cfg(feature = "tables")]
     definitions.push(crate::tables::tables_module::module_def(&builder.ctx));
     #[cfg(feature = "http")]
@@ -106,10 +122,10 @@ pub(crate) fn interpreter() -> Interpreter {
         .build()
 }
 
-fn execute(script: &str, vm: &VirtualMachine) -> Result<Value, ErrorDetail> {
+fn execute(script: &str, vm: &VirtualMachine, sql: bool) -> Result<Value, ErrorDetail> {
     vm.recursion_limit.set(PYTHON_RECURSION);
     capture::install(vm).map_err(|error| python_error(error, vm, "runtime"))?;
-    let _closed = policy::install(vm).map_err(|error| python_error(error, vm, "runtime"))?;
+    let _closed = policy::install(vm, sql).map_err(|error| python_error(error, vm, "runtime"))?;
 
     let scope = vm.new_scope_with_builtins();
     scope

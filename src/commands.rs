@@ -4,7 +4,7 @@ use clap::{Parser, Subcommand};
 use dekopon_provider_sdk::provider::{Proposal, Usage};
 
 #[cfg(feature = "http")]
-const AFTER_HELP: &str = "Proposes python.eval. Pure scripts need no HTTP grant.
+const AFTER_HELP: &str = "Proposes python.eval; python sql proposes python.sqlite-eval with sqlite3.connect() (pathless). Pure scripts need no HTTP grant.
 Imports json, re, yaml, time (wall/monotonic), math, collections,
 itertools, functools, decimal, fractions, csv, io (memory only), base64,
 dekopon_numeric,
@@ -22,7 +22,7 @@ Script: at most 65,536 UTF-8 bytes. print() is bounded to 65,536 bytes.
 Assign a safe JSON-shaped value to result. Runtime output is bounded JSON with
 ok/stdout/stdoutTruncated/result (or error), not an OS exit status.";
 #[cfg(not(feature = "http"))]
-const AFTER_HELP: &str = "Proposes python.eval. Imports json, re, yaml, time (wall/monotonic), math, collections, itertools, functools, decimal, fractions, csv, io (memory only), base64, and dekopon_numeric; no filesystem or network authority.";
+const AFTER_HELP: &str = "Proposes python.eval; python sql proposes python.sqlite-eval with sqlite3.connect() (pathless). Imports json, re, yaml, time (wall/monotonic), math, collections, itertools, functools, decimal, fractions, csv, io (memory only), base64, and dekopon_numeric; no filesystem or network authority.";
 
 #[cfg(feature = "tables")]
 const TABLES_HELP: &str = "dekopon_tables is available for bounded in-memory SQL.";
@@ -53,6 +53,7 @@ pub(crate) const ABOUT: &str =
     about = ABOUT,
     override_usage = "python -c <CODE>\n       python - <<'EOF'\n       python <<'EOF'\n       python sql -c <CODE>",
     after_help = format!("{AFTER_HELP}\n{TABLES_HELP}"),
+    args_conflicts_with_subcommands = true,
     group = clap::ArgGroup::new("script").args(["code", "piped"]),
 )]
 pub struct Python {
@@ -69,7 +70,7 @@ pub struct Python {
 
 #[derive(Subcommand)]
 enum PythonCommand {
-    /// Persistent SQL (requires python.sqlite-eval; unavailable until the sqlite3 facade is built)
+    /// Persistent SQL (requires python.sqlite-eval)
     Sql {
         /// Run CODE as the SQL-capable Python script
         #[arg(short = 'c', value_name = "CODE", allow_hyphen_values = true)]
@@ -89,9 +90,21 @@ pub(crate) fn propose(args: Python, stdin_piped: bool) -> Result<Proposal<Python
     let (script, stdin_script) = match (code, piped) {
         (Some(code), None) => (code, false),
         (None, Some(_)) if stdin_piped => (String::new(), true),
-        (None, Some(_)) => return Err(Usage::new("python -: nothing was piped in")),
+        (None, Some(_)) => {
+            return Err(Usage::new(if sql {
+                "python sql -: nothing was piped in"
+            } else {
+                "python -: nothing was piped in"
+            }));
+        }
         (None, None) if stdin_piped => (String::new(), true),
-        _ => return Err(Usage::new("python takes `-c <CODE>` or `-`")),
+        _ => {
+            return Err(Usage::new(if sql {
+                "python sql takes `-c <CODE>` or `-`"
+            } else {
+                "python takes `-c <CODE>` or `-`"
+            }));
+        }
     };
     let input = EvalInput {
         script,
@@ -165,6 +178,7 @@ mod tests {
             &["script.py"],
             &["-c", "x", "-"],
             &["sql", "file.py"],
+            &["-c", "x", "sql", "-c", "result=1"],
         ] {
             assert!(
                 matches!(

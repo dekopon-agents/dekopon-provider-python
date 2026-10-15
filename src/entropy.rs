@@ -57,3 +57,21 @@ unsafe extern "Rust" fn __getrandom_v03_custom(
     }
     Ok(())
 }
+
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+#[unsafe(no_mangle)]
+unsafe extern "Rust" fn __getrandom_v04_custom(
+    destination: *mut u8,
+    length: usize,
+) -> Result<(), getrandom04::Error> {
+    if destination.is_null() && length != 0 {
+        return Err(getrandom04::Error::UNEXPECTED);
+    }
+    let mut bytes = vec![0; length];
+    fill_random(&mut bytes).map_err(|()| getrandom04::Error::UNEXPECTED)?;
+    if length != 0 {
+        // SAFETY: getrandom supplies a writable region of length bytes.
+        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), destination, length) };
+    }
+    Ok(())
+}

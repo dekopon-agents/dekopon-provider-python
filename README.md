@@ -2,7 +2,7 @@
 
 A WebAssembly component with broker-granted HTTP and child-script execution exposing
 read-only `python.eval` and a separately authorized local-write `python.sqlite-eval`
-(which fails closed until the SQLite facade lands). It embeds **RustPython 0.5.0 exactly**, creates a fresh interpreter per call,
+(backed by the shared fixed `main.db` namespace). It embeds **RustPython 0.5.0 exactly**, creates a fresh interpreter per call,
 captures bounded stdout in Rust, and returns only a bounded JSON-shaped result. A Dekopon shell
 reaches it through the `python` command word. Version 0.8.0 adds `dekopon_subshell` to the
 combined toolkit, pinned to the published Dekopon SDK 0.33.0. It exports `run-command` through
@@ -18,7 +18,7 @@ the current provider world.
 ## Broker-granted HTTP
 
 The component is **`python-provider.wasm`**, exposing **`python.eval`** and the
-interim fail-closed **`python.sqlite-eval`**, with command word **`python`**. Cargo feature `http` is default-on and keeps Dekopon-specific
+**`python.sqlite-eval`**, with command word **`python`**. Cargo feature `http` is default-on and keeps Dekopon-specific
 HTTP code clearly separated; disabling defaults is a developer customization, not a supported
 CI or distribution variant. Ordinary Cargo builds include `dekopon_requests`.
 The component imports exactly `dekopon:stdio/streams@0.1.0`,
@@ -146,10 +146,19 @@ takes only a script, named by `-c`, `-`, or nothing at all when stdin is piped
 in — `python <<'EOF' … EOF` matches CPython's own read of a non-tty stdin when given no file.
 The script reader bounds bytes and validates UTF-8 only after authorization; `-c` retains stdin
 as program data rather than interpreting it as script. `python sql -c CODE` (or `python sql -`
-with piped input) proposes the separate local-write `python.sqlite-eval` grant. In this interim
-2a build that capability fails closed without opening storage; the bounded `sqlite3` facade
-and persisted-row interoperability are deferred to 2b. Existing `python.eval` grants cannot
-invoke it, and `python -c` still cannot import `sqlite3`.
+with piped input) proposes the separate local-write `python.sqlite-eval` grant. Only this
+capability can import `sqlite3`; `connect()` accepts no path or URI and uses the broker-owned
+`main.db`. `execute(sql, tuple_of_parameters)` supports None, integer and text parameters;
+`fetchone()` and `fetchall()` return bounded rows; `commit()`, `rollback()`, and `close()`
+finish or discard pending writes. Close invalidates the connection and cursors. The
+adapter checkpoints the WAL on every invocation. Grant `storage` to `python.sqlite-eval` with
+`scope: agent` and `namespace: turso` to share data with `turso.exec`. Keep `http` grants under
+`python.eval`; storage and HTTP constraints cannot be combined on one invocation. An absent or
+null namespace instead selects Python-local storage. Existing `python.eval` grants cannot
+invoke SQL, and `python -c` still cannot import `sqlite3`. The shipped Python and Turso
+components use provider SDK 0.33.0; the cross-provider storage test uses published broker-host
+0.47.0 (its typed testkit cannot accept SDK 0.33.0's Provider trait). Deployment must supply
+that newer broker's owner-selected namespace binding; this component supplies no grant.
 
 ## Running it
 
@@ -307,8 +316,8 @@ stdlib/package compatibility, pip, or persistence.
 
 The exact component contract allows only Dekopon stdio, HTTP 1.1, wall and monotonic clocks,
 OS entropy, and spawn 0.1. There is no WASI, JS/browser, host environment, filesystem, raw
-socket, usable storage (until the 2b sqlite3 facade), OS subprocess, dynamic loading, or generic provider dispatch. Entropy is a broker import; the clocks back `time` only during invocation. Imports including `sys`, `os`, `random`, `secrets`, `socket`,
-`ssl`, `sqlite3`, `subprocess`, `threading`, `ctypes`, `tkinter`, and `webbrowser` are denied.
+socket, arbitrary filesystem storage, OS subprocess, dynamic loading, or generic provider dispatch. Entropy is a broker import; the clocks back `time` only during invocation. Imports including `sys`, `os`, `random`, `secrets`, `socket`,
+`ssl`, `subprocess`, `threading`, `ctypes`, `tkinter`, and `webbrowser` are denied.
 `open`, `input`, and `breakpoint` are absent; guest `compile`, `eval`, and `exec` are denied.
 
 The VM hash seed remains fixed. The getrandom backend uses broker OS entropy only during an
