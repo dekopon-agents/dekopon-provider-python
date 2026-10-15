@@ -16,15 +16,16 @@ crate-type = ["cdylib", "rlib"]
 [features]
 default = ["http"]
 http = []
+tables = ["dep:datafusion", "dep:tokio"]
 
 [dependencies]
 clap = { version = "=4.6.6", features = ["derive"] }
 dekopon-provider-sdk = "=0.33.0"
-datafusion = { git = "https://github.com/dekopon-agents/datafusion.git", rev = "cf3778098ad3ea283ecd8ee2a991be7d9a29750c", default-features = false, features = ["sql", "dekopon-wasm", "string_expressions", "datetime_expressions"] }
+datafusion = { git = "https://github.com/dekopon-agents/datafusion.git", rev = "cf3778098ad3ea283ecd8ee2a991be7d9a29750c", default-features = false, optional = true, features = ["sql", "dekopon-wasm", "string_expressions", "datetime_expressions"] }
 ndarray = { version = "=0.17.2", default-features = false, features = ["std"] }
 statrs = { version = "=0.19.1", default-features = false, features = ["std"] }
 smartcore = { version = "=0.6.14", default-features = false }
-tokio = { version = "=1.52.4", default-features = false, features = ["rt"] }
+tokio = { version = "=1.52.4", default-features = false, optional = true, features = ["rt"] }
 schemars = "=1.2.2"
 getrandom = "=0.3.4"
 num-traits = "=0.2.19"

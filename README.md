@@ -26,8 +26,8 @@ The component imports exactly `dekopon:stdio/streams@0.1.0`,
 `dekopon:clock/monotonic@1.1.0`, `dekopon:random/source@0.1.0`, and
 `dekopon:spawn/run@0.1.0`. The broker must link all six even for pure scripts,
 which succeed without HTTP or child-script grants.
-DataFusion's raw clock imports account for both clocks; SQL's native entropy uses the SDK's
-invocation-scoped random handle. Bare empty-linker Wasmtime cannot instantiate the component.
+The public SDK Clock and Monotonic handles back Python's invocation-only `time.time()`
+and `time.monotonic()`; SQL's native entropy uses the SDK's invocation-scoped random handle. Bare empty-linker Wasmtime cannot instantiate the component.
 
 Configure the broker's route/constraint set for `python.eval` with an explicit `http` grant:
 `allowedHosts` (exact authorities, including effective nondefault port), `allowedMethods` (`GET`
@@ -89,7 +89,9 @@ cargo fmt --all --check
 cargo clippy --locked --workspace --all-targets -- -D warnings
 cargo deny --all-features check bans licenses sources advisories
 AR_wasm32_unknown_unknown=/opt/homebrew/opt/llvm/bin/llvm-ar bash ../provider-workflows/build.sh
-DEKOPON_PROVIDER_COMPONENT=$PWD/python-provider.wasm cargo test --locked --workspace --all-features
+DEKOPON_PROVIDER_COMPONENT=$PWD/python-provider.wasm cargo test --locked --workspace
+# For optional SQL, rebuild the component with --all-features in the same shared-build environment;
+# test against that distinct artifact with cargo test --locked --workspace --all-features.
 ```
 
 The `AR_wasm32_unknown_unknown` override is needed on macOS where Apple `ar` creates an empty
@@ -253,7 +255,9 @@ submodules such as `re._parser` and `json.decoder` are denied:
   `safe_dump(safe_value)`, and `YAMLError`;
 - `dekopon_requests` — bounded GET/HEAD under the invocation HTTP grant described above;
 - `dekopon_subshell` — bounded child script execution through the invocation spawn handle;
-- `dekopon_tables` — `query(sql, tables)` for one query-only SELECT over at most four supplied
+- `time` — `time()` reports broker wall seconds; `monotonic()` reports invocation-relative
+  seconds. Neither is available during metadata/description processing;
+- `dekopon_tables` (optional `tables` feature, default-off) — `query(sql, tables)` for one query-only SELECT over at most four supplied
   in-memory tables (256 input rows total, eight columns per table). At most 256 rows and 16 columns
   are projected; disk spill is disabled, the query pool is 8 MiB, and external sources, COPY,
   DDL and DML are refused;
@@ -263,6 +267,7 @@ submodules such as `re._parser` and `json.decoder` are denied:
   128 rows × 8 features. The seed is explicit, not ambient entropy.
 
 ```python
+# Requires the optional `tables` feature and its matching built component.
 import dekopon_tables as tables
 import dekopon_numeric as numeric
 
@@ -296,7 +301,7 @@ stdlib/package compatibility, pip, or persistence.
 The exact component contract allows only Dekopon stdio, HTTP 1.1, wall and monotonic clocks,
 OS entropy, and spawn 0.1. There is no WASI, JS/browser, host environment, filesystem, raw
 socket, storage, OS subprocess, dynamic loading, or generic provider dispatch. Clocks and
-entropy are broker imports, not Python modules. Imports including `sys`, `os`, `time`, `random`, `secrets`, `socket`,
+entropy are broker imports, not Python modules. Imports including `sys`, `os`, `random`, `secrets`, `socket`,
 `ssl`, `sqlite3`, `subprocess`, `threading`, `ctypes`, `tkinter`, and `webbrowser` are denied.
 `open`, `input`, and `breakpoint` are absent; guest `compile`, `eval`, and `exec` are denied.
 

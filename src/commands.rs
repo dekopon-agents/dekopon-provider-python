@@ -5,9 +5,10 @@ use dekopon_provider_sdk::provider::{Proposal, Usage};
 
 #[cfg(feature = "http")]
 const AFTER_HELP: &str = "Proposes python.eval. Pure scripts need no HTTP grant.
-Imports json, re, yaml, dekopon_requests (GET/HEAD only), and dekopon_subshell.
+Imports json, re, yaml, time (wall/monotonic), dekopon_numeric,
+dekopon_requests (GET/HEAD only), and dekopon_subshell.
 Every HTTP call is constrained by the host invocation grant; no credentials,
-redirects, retries, sockets, filesystem, clock, or input().
+redirects, retries, sockets, filesystem, or input().
 dekopon_subshell.run(script, stdin=None|INHERIT) runs a child Dekopon shell
 script under this invocation's grants and returns CompletedRun(returncode,
 stdout, stderr, truncated); stdout is capped at 65,536 bytes. INHERIT hands the
@@ -19,7 +20,22 @@ Script: at most 65,536 UTF-8 bytes. print() is bounded to 65,536 bytes.
 Assign a safe JSON-shaped value to result. Runtime output is bounded JSON with
 ok/stdout/stdoutTruncated/result (or error), not an OS exit status.";
 #[cfg(not(feature = "http"))]
-const AFTER_HELP: &str = "Proposes python.eval. Imports json, re, and yaml; no host authority.";
+const AFTER_HELP: &str = "Proposes python.eval. Imports json, re, yaml, time (wall/monotonic), and dekopon_numeric; no filesystem or network authority.";
+
+#[cfg(feature = "tables")]
+const TABLES_HELP: &str = "dekopon_tables is available for bounded in-memory SQL.";
+#[cfg(not(feature = "tables"))]
+const TABLES_HELP: &str = "dekopon_tables is not built into this component.";
+
+#[cfg(all(feature = "http", feature = "tables"))]
+pub(crate) const CAPABILITY_DESCRIPTION: &str = "Evaluate bounded Python with in-memory dekopon_tables SQL, dekopon_numeric, invocation time, broker-granted dekopon_requests GET/HEAD and dekopon_subshell child scripts; assign output to result";
+#[cfg(all(feature = "http", not(feature = "tables")))]
+pub(crate) const CAPABILITY_DESCRIPTION: &str = "Evaluate bounded Python with dekopon_numeric, invocation time, broker-granted dekopon_requests GET/HEAD and dekopon_subshell child scripts; assign output to result";
+#[cfg(all(not(feature = "http"), feature = "tables"))]
+pub(crate) const CAPABILITY_DESCRIPTION: &str = "Evaluate bounded Python with in-memory dekopon_tables SQL, dekopon_numeric and invocation time; assign output to result";
+#[cfg(all(not(feature = "http"), not(feature = "tables")))]
+pub(crate) const CAPABILITY_DESCRIPTION: &str =
+    "Evaluate bounded Python with dekopon_numeric and invocation time; assign output to result";
 
 #[cfg(not(feature = "http"))]
 pub(crate) const ABOUT: &str =
@@ -33,6 +49,7 @@ pub(crate) const ABOUT: &str =
     name = COMMAND_WORD,
     version,
     about = ABOUT,
+    long_about = TABLES_HELP,
     override_usage = "python -c <CODE>\n       python - <<'EOF'\n       python <<'EOF'",
     after_help = AFTER_HELP,
     group = clap::ArgGroup::new("script").args(["code", "piped"]),
@@ -62,6 +79,7 @@ pub(crate) fn propose(args: Python, stdin_piped: bool) -> Result<Proposal<Python
 
 #[cfg(test)]
 mod tests {
+    use super::TABLES_HELP;
     use crate::PythonProvider;
     use dekopon_provider_sdk::{CommandRunOutcome, provider};
     use serde_json::json;
@@ -115,6 +133,24 @@ mod tests {
         else {
             panic!("expected safe help")
         };
+        for phrase in ["dekopon_numeric", "time (wall/monotonic)", TABLES_HELP] {
+            assert!(stdout.contains(phrase), "{phrase}");
+        }
+        let description = <crate::Eval as provider::Capability>::DESCRIPTION;
+        for phrase in ["dekopon_numeric", "invocation time"] {
+            assert!(description.contains(phrase), "{phrase}: {description}");
+        }
+        assert_eq!(
+            description.contains("dekopon_tables"),
+            cfg!(feature = "tables")
+        );
+        for phrase in ["dekopon_requests", "dekopon_subshell"] {
+            assert_eq!(
+                description.contains(phrase),
+                cfg!(feature = "http"),
+                "{phrase}: {description}"
+            );
+        }
         #[cfg(feature = "http")]
         for phrase in [
             "dekopon_subshell.run",
