@@ -5,7 +5,9 @@ use dekopon_provider_sdk::provider::{Proposal, Usage};
 
 #[cfg(feature = "http")]
 const AFTER_HELP: &str = "Proposes python.eval. Pure scripts need no HTTP grant.
-Imports json, re, yaml, time (wall/monotonic), dekopon_numeric,
+Imports json, re, yaml, time (wall/monotonic), math, collections,
+itertools, functools, decimal, fractions, csv, io (memory only), base64,
+dekopon_numeric,
 dekopon_requests (GET/HEAD only), and dekopon_subshell.
 Every HTTP call is constrained by the host invocation grant; no credentials,
 redirects, retries, sockets, filesystem, or input().
@@ -20,7 +22,7 @@ Script: at most 65,536 UTF-8 bytes. print() is bounded to 65,536 bytes.
 Assign a safe JSON-shaped value to result. Runtime output is bounded JSON with
 ok/stdout/stdoutTruncated/result (or error), not an OS exit status.";
 #[cfg(not(feature = "http"))]
-const AFTER_HELP: &str = "Proposes python.eval. Imports json, re, yaml, time (wall/monotonic), and dekopon_numeric; no filesystem or network authority.";
+const AFTER_HELP: &str = "Proposes python.eval. Imports json, re, yaml, time (wall/monotonic), math, collections, itertools, functools, decimal, fractions, csv, io (memory only), base64, and dekopon_numeric; no filesystem or network authority.";
 
 #[cfg(feature = "tables")]
 const TABLES_HELP: &str = "dekopon_tables is available for bounded in-memory SQL.";
@@ -49,9 +51,8 @@ pub(crate) const ABOUT: &str =
     name = COMMAND_WORD,
     version,
     about = ABOUT,
-    long_about = TABLES_HELP,
     override_usage = "python -c <CODE>\n       python - <<'EOF'\n       python <<'EOF'",
-    after_help = AFTER_HELP,
+    after_help = format!("{AFTER_HELP}\n{TABLES_HELP}"),
     group = clap::ArgGroup::new("script").args(["code", "piped"]),
 )]
 pub struct Python {
@@ -133,7 +134,28 @@ mod tests {
         else {
             panic!("expected safe help")
         };
-        for phrase in ["dekopon_numeric", "time (wall/monotonic)", TABLES_HELP] {
+        assert!(
+            stdout.starts_with(
+                "Run one Python 3 script with broker-granted HTTP in a fresh RustPython 0.5.0 VM"
+            ) || stdout
+                .starts_with("Run one Python 3 script in a fresh, import-free RustPython 0.5.0 VM"),
+            "{stdout}"
+        );
+        for phrase in [
+            "RustPython 0.5.0",
+            "dekopon_numeric",
+            "time (wall/monotonic)",
+            TABLES_HELP,
+            "math",
+            "collections",
+            "itertools",
+            "functools",
+            "decimal",
+            "fractions",
+            "csv",
+            "io (memory only)",
+            "base64",
+        ] {
             assert!(stdout.contains(phrase), "{phrase}");
         }
         let description = <crate::Eval as provider::Capability>::DESCRIPTION;

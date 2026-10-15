@@ -171,6 +171,55 @@ fn default_component_has_numeric_time_and_denies_tables_and_escape() {
 }
 
 #[test]
+fn bounded_stdlib_computes_in_built_component() {
+    std::thread::Builder::new()
+        .stack_size(32 * 1024 * 1024)
+        .spawn(|| {
+            let script = r#"
+import math, collections, itertools, functools, decimal, fractions, csv, io, base64
+stream = io.StringIO('a,b\n1,2\n')
+result = [math.sqrt(4), collections.deque([1,2]).pop(),
+          list(itertools.islice(itertools.count(), 3)),
+          functools.reduce(lambda a,b: a+b, [1,2,3]),
+          str(decimal.Decimal('0.1') + decimal.Decimal('0.2')),
+          str(fractions.Fraction(1, 3) + fractions.Fraction(1, 6)),
+          list(csv.reader(stream)), io.BytesIO(b'xy').getvalue().decode(),
+          base64.b64decode(base64.b64encode(b'xy')).decode()]
+"#;
+            let expected = json!([
+                2.0,
+                2,
+                [0, 1, 2],
+                6,
+                "0.3",
+                "1/2",
+                [["a", "b"], ["1", "2"]],
+                "xy",
+                "xy"
+            ]);
+            let built = eval(script);
+            assert_eq!(built["result"], expected, "{built}");
+            for script in [
+                "import io\nio.open('x')",
+                "import io\nio.FileIO('x')",
+                "open('x')",
+                "import datetime",
+                "import statistics",
+            ] {
+                let output = eval(script);
+                assert_eq!(output["ok"], false, "{script}: {output}");
+            }
+            for name in ["os", "sys", "socket", "subprocess"] {
+                let output = eval(&format!("import {name}"));
+                assert_eq!(output["error"]["type"], "ImportError", "{output}");
+            }
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+#[test]
 fn component_has_exact_toolkit_authority() {
     conformance::<PythonProvider>(component())
         .expect("typed declaration matches decoded imports and manifest");

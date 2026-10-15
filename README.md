@@ -86,11 +86,11 @@ and component checks all run through the shared
 
 ```console
 cargo fmt --all --check
-cargo clippy --locked --workspace --all-targets -- -D warnings
+cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 cargo deny --all-features check bans licenses sources advisories
 AR_wasm32_unknown_unknown=/opt/homebrew/opt/llvm/bin/llvm-ar bash ../provider-workflows/build.sh
 DEKOPON_PROVIDER_COMPONENT=$PWD/python-provider.wasm cargo test --locked --workspace
-# For optional SQL, rebuild the component with --all-features in the same shared-build environment;
+# For optional SQL, copy provider-workflows/build.sh and add `--all-features` to its `cargo build` line;
 # test against that distinct artifact with cargo test --locked --workspace --all-features.
 ```
 
@@ -257,6 +257,8 @@ submodules such as `re._parser` and `json.decoder` are denied:
 - `dekopon_subshell` — bounded child script execution through the invocation spawn handle;
 - `time` — `time()` reports broker wall seconds; `monotonic()` reports invocation-relative
   seconds. Neither is available during metadata/description processing;
+- `math`, `collections`, `itertools`, `functools`, `decimal`, `fractions`, `csv`, `io`,
+  `base64` — bounded stdlib computation; `io` offers in-memory streams only, not file-backed open;
 - `dekopon_tables` (optional `tables` feature, default-off) — `query(sql, tables)` for one query-only SELECT over at most four supplied
   in-memory tables (256 input rows total, eight columns per table). At most 256 rows and 16 columns
   are projected; disk spill is disabled, the query pool is 8 MiB, and external sources, COPY,
@@ -300,8 +302,7 @@ stdlib/package compatibility, pip, or persistence.
 
 The exact component contract allows only Dekopon stdio, HTTP 1.1, wall and monotonic clocks,
 OS entropy, and spawn 0.1. There is no WASI, JS/browser, host environment, filesystem, raw
-socket, storage, OS subprocess, dynamic loading, or generic provider dispatch. Clocks and
-entropy are broker imports, not Python modules. Imports including `sys`, `os`, `random`, `secrets`, `socket`,
+socket, storage, OS subprocess, dynamic loading, or generic provider dispatch. Entropy is a broker import; the clocks back `time` only during invocation. Imports including `sys`, `os`, `random`, `secrets`, `socket`,
 `ssl`, `sqlite3`, `subprocess`, `threading`, `ctypes`, `tkinter`, and `webbrowser` are denied.
 `open`, `input`, and `breakpoint` are absent; guest `compile`, `eval`, and `exec` are denied.
 

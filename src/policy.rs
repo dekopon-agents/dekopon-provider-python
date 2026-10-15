@@ -8,6 +8,15 @@ const ALLOWED_MODULES: &[&str] = &[
     "re",
     "yaml",
     "time",
+    "math",
+    "collections",
+    "itertools",
+    "functools",
+    "decimal",
+    "fractions",
+    "csv",
+    "io",
+    "base64",
     "dekopon_numeric",
     #[cfg(feature = "tables")]
     "dekopon_tables",
@@ -172,6 +181,15 @@ impl Drop for ClosedIntrospection {
 pub(crate) fn install(vm: &VirtualMachine) -> PyResult<ClosedIntrospection> {
     // Resolve the complete frozen/native dependency closure while the VM still has its pristine
     // internal import machinery. Guest imports never execute that machinery.
+    // RustPython's frozen io.py requires a file-backed FileIO that its _io does not provide.
+    // Expose only _io's memory streams under the public io name before csv imports it.
+    let memory_io = vm.import("_io", 0)?;
+    for name in ["open", "open_code", "FileIO"] {
+        let _removed = memory_io.del_attr(name, vm);
+    }
+    vm.sys_module
+        .get_attr("modules", vm)?
+        .set_item("io", memory_io.clone(), vm)?;
     let public_modules = ALLOWED_MODULES
         .iter()
         .map(|name| vm.import(*name, 0).map(|module| (*name, module)))
@@ -274,6 +292,15 @@ mod tests {
             "re",
             "yaml",
             "time",
+            "math",
+            "collections",
+            "itertools",
+            "functools",
+            "decimal",
+            "fractions",
+            "csv",
+            "io",
+            "base64",
             "dekopon_requests",
             "dekopon_subshell",
             "dekopon_numeric",
