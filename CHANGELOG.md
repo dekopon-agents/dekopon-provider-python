@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-16
+
+### Added
+
+- `python sql -c CODE` and `python sql -` run bounded pathless SQLite under a separately granted local-write `python.sqlite-eval` and share persisted rows with turso-sql; `python.eval` stays read-only.
+- `math`, `collections` (no `namedtuple`), `itertools`, `functools`, `decimal`, `fractions`, `csv`, in-memory `io` (`StringIO`/`BytesIO`, no `open`) and `base64` are importable; `--help` names them.
+- `time.time()` and `time.monotonic()` read the broker's invocation wall and monotonic clocks; `--help` and the capability description name the imports actually built.
+
+### Changed
+
+- The default component no longer includes in-memory `dekopon_tables` SQL (DataFusion); build with the `tables` feature to retain it.
+- The component imports `dekopon:storage/durable-files@0.1.1` (seven imports); existing `python.eval` grants are unchanged and cannot reach storage.
+
+### Fixed
+
+- Inline Python scripts preserve piped stdin for authorized child scripts.
+- Build with patched rustls 0.23.46 and Wasmtime 49.0.3.
+
 ## [0.8.0] - 2026-10-04
 
 ### Added
