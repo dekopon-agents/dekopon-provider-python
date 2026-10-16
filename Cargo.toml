@@ -21,8 +21,9 @@ tables = ["dep:datafusion", "dep:tokio"]
 [dependencies]
 clap = { version = "=4.6.6", features = ["derive"] }
 dekopon-provider-sdk = "=0.33.0"
-dekopon-turso-sql-io = { git = "https://github.com/dekopon-agents/dekopon-provider-turso-sql", rev = "fd7b092f32fd2e6b65811a380f5edc28b06be451" }
-getrandom02 = { package = "getrandom", version = "0.2", features = ["custom"] }
+dekopon-turso-sql-io = { git = "https://github.com/dekopon-agents/dekopon-provider-turso-sql", rev = "fd7b092f32fd2e6b65811a380f5edc28b06be451", default-features = false }
+getrandom02 = { package = "getrandom", version = "=0.2.17", features = ["custom"] }
+getrandom04 = { package = "getrandom", version = "=0.4.3" }
 datafusion = { git = "https://github.com/dekopon-agents/datafusion.git", rev = "cf3778098ad3ea283ecd8ee2a991be7d9a29750c", default-features = false, optional = true, features = ["sql", "dekopon-wasm", "string_expressions", "datetime_expressions"] }
 ndarray = { version = "=0.17.2", default-features = false, features = ["std"] }
 statrs = { version = "=0.19.1", default-features = false, features = ["std"] }
@@ -42,6 +43,12 @@ yaml-rust2 = { version = "=0.12.0", default-features = false }
 [dev-dependencies]
 dekopon-broker-host = "=0.33.0"
 dekopon-provider-sdk-testkit = "=0.33.0"
+dekopon-broker-host-shared = { package = "dekopon-broker-host", version = "=0.47.0" }
+dekopon-broker-shared = { package = "dekopon-broker", version = "=0.47.0" }
+dekopon-capability-shared = { package = "dekopon-capability", version = "=0.47.0" }
+dekopon-core-shared = { package = "dekopon-core", version = "=0.47.0" }
+dekopon-storage-host-shared = { package = "dekopon-storage-host", version = "=0.47.0" }
+sha2 = "=0.11.0"
 tempfile = "=3.27.0"
 tokio = { version = "=1.52.4", default-features = false, features = ["macros", "rt-multi-thread", "sync"] }
 

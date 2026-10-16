@@ -178,7 +178,7 @@ impl Drop for ClosedIntrospection {
     }
 }
 
-pub(crate) fn install(vm: &VirtualMachine) -> PyResult<ClosedIntrospection> {
+pub(crate) fn install(vm: &VirtualMachine, sql: bool) -> PyResult<ClosedIntrospection> {
     // Resolve the complete frozen/native dependency closure while the VM still has its pristine
     // internal import machinery. Guest imports never execute that machinery.
     // RustPython's frozen io.py requires a file-backed FileIO that its _io does not provide.
@@ -192,7 +192,9 @@ pub(crate) fn install(vm: &VirtualMachine) -> PyResult<ClosedIntrospection> {
         .set_item("io", memory_io.clone(), vm)?;
     let public_modules = ALLOWED_MODULES
         .iter()
-        .map(|name| vm.import(*name, 0).map(|module| (*name, module)))
+        .copied()
+        .chain(sql.then_some("sqlite3"))
+        .map(|name| vm.import(name, 0).map(|module| (name, module)))
         .collect::<PyResult<Vec<_>>>()?;
     let policy = vm.import("_dekopon_policy", 0)?;
     let guarded_import = policy.get_attr("guarded_import", vm)?;
@@ -287,7 +289,7 @@ pub(crate) fn install(vm: &VirtualMachine) -> PyResult<ClosedIntrospection> {
 }
 
 pub(crate) fn is_allowed_module(name: &str) -> bool {
-    ALLOWED_MODULES.contains(&name)
+    ALLOWED_MODULES.contains(&name) || (name == "sqlite3" && crate::sqlite::active())
 }
 
 #[cfg(test)]

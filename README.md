@@ -2,7 +2,7 @@
 
 A WebAssembly component with broker-granted HTTP and child-script execution exposing
 read-only `python.eval` and a separately authorized local-write `python.sqlite-eval`
-(which fails closed until the SQLite facade lands). It embeds **RustPython 0.5.0 exactly**, creates a fresh interpreter per call,
+(backed by the shared fixed `main.db` namespace). It embeds **RustPython 0.5.0 exactly**, creates a fresh interpreter per call,
 captures bounded stdout in Rust, and returns only a bounded JSON-shaped result. A Dekopon shell
 reaches it through the `python` command word. Version 0.8.0 adds `dekopon_subshell` to the
 combined toolkit, pinned to the published Dekopon SDK 0.33.0. It exports `run-command` through
@@ -18,7 +18,7 @@ the current provider world.
 ## Broker-granted HTTP
 
 The component is **`python-provider.wasm`**, exposing **`python.eval`** and the
-interim fail-closed **`python.sqlite-eval`**, with command word **`python`**. Cargo feature `http` is default-on and keeps Dekopon-specific
+**`python.sqlite-eval`**, with command word **`python`**. Cargo feature `http` is default-on and keeps Dekopon-specific
 HTTP code clearly separated; disabling defaults is a developer customization, not a supported
 CI or distribution variant. Ordinary Cargo builds include `dekopon_requests`.
 The component imports exactly `dekopon:stdio/streams@0.1.0`,
@@ -146,10 +146,23 @@ takes only a script, named by `-c`, `-`, or nothing at all when stdin is piped
 in — `python <<'EOF' … EOF` matches CPython's own read of a non-tty stdin when given no file.
 The script reader bounds bytes and validates UTF-8 only after authorization; `-c` retains stdin
 as program data rather than interpreting it as script. `python sql -c CODE` (or `python sql -`
-with piped input) proposes the separate local-write `python.sqlite-eval` grant. In this interim
-2a build that capability fails closed without opening storage; the bounded `sqlite3` facade
-and persisted-row interoperability are deferred to 2b. Existing `python.eval` grants cannot
-invoke it, and `python -c` still cannot import `sqlite3`.
+with piped input) proposes the separate local-write `python.sqlite-eval` grant. Only this
+capability can import `sqlite3`; `connect()` accepts no path or URI and uses the broker-owned
+`main.db`. `execute(sql, tuple_of_parameters)` supports None, bool, integer, float, text and
+bytes parameters; `fetchone()` and `fetchall()` return bounded rows; `commit()`, `rollback()`,
+and `close()` finish or discard pending writes. An uncommitted transaction is rolled back
+at script end (including on an exception); close invalidates the connection and cursors.
+The adapter checkpoints committed WAL frames on every invocation. Grant `storage` to
+`python.sqlite-eval` with `scope: agent` and `namespace: turso` to share data with
+`turso.exec`. In a deployed python.yaml with provider-level `http`, move that block under
+`python.eval:` before adding `python.sqlite-eval`; capability 0.47.0 refuses HTTP and storage
+constraints on one capability. Spawn is deliberately omitted from `python.sqlite-eval`:
+a child `turso exec` on the same namespace could wait on the parent's storage lock.
+An absent or null namespace instead selects Python-local storage. Existing `python.eval` grants cannot
+invoke SQL, and `python -c` still cannot import `sqlite3`. The shipped Python and Turso
+components use provider SDK 0.33.0; the cross-provider storage test uses published broker-host
+0.47.0 (its typed testkit cannot accept SDK 0.33.0's Provider trait). Deployment must supply
+that newer broker's owner-selected namespace binding; this component supplies no grant.
 
 ## Running it
 
@@ -301,14 +314,15 @@ keys, multiple documents, non-finite/out-of-range numbers, and excess size/depth
 alias expansion. Timestamp-looking plain scalars such as `2025-02-03` remain strings.
 
 This is RustPython 0.5.0 with the tested module/value subset, not CPython conformance, arbitrary
-stdlib/package compatibility, pip, or persistence.
+stdlib/package compatibility or pip. `python.eval` is read-only and has no persistence;
+separately granted `python.sqlite-eval` persists bounded SQL in broker-owned `main.db`.
 
 ## Denied authority and determinism
 
 The exact component contract allows only Dekopon stdio, HTTP 1.1, wall and monotonic clocks,
-OS entropy, and spawn 0.1. There is no WASI, JS/browser, host environment, filesystem, raw
-socket, usable storage (until the 2b sqlite3 facade), OS subprocess, dynamic loading, or generic provider dispatch. Entropy is a broker import; the clocks back `time` only during invocation. Imports including `sys`, `os`, `random`, `secrets`, `socket`,
-`ssl`, `sqlite3`, `subprocess`, `threading`, `ctypes`, `tkinter`, and `webbrowser` are denied.
+OS entropy, spawn 0.1, and `dekopon:storage/durable-files@0.1.1` (only for `python.sqlite-eval`). There is no WASI, JS/browser, host environment, filesystem, raw
+socket, arbitrary filesystem storage, OS subprocess, dynamic loading, or generic provider dispatch. Entropy is a broker import; the clocks back `time` only during invocation. Imports including `sys`, `os`, `random`, `secrets`, `socket`,
+`ssl`, `subprocess`, `threading`, `ctypes`, `tkinter`, and `webbrowser` are denied.
 `open`, `input`, and `breakpoint` are absent; guest `compile`, `eval`, and `exec` are denied.
 
 The VM hash seed remains fixed. The getrandom backend uses broker OS entropy only during an
@@ -320,7 +334,7 @@ deadline, memory, admission, and container limits are mandatory.
 See [SECURITY.md](SECURITY.md) for the complete provider/host split and
 [docs/deployment-profile.md](docs/deployment-profile.md) for artifact size, import contract and broker memory evidence. Per-memory limits are not process
 RSS; the owner's Pi deployment limits remain a separate decision. A script gets no generic
-provider dispatch, registry lookup, proposal submission, persistence, or privileged imports. Child shell scripts are available only through the scoped spawn handle
+provider dispatch, registry lookup, proposal submission, arbitrary persistence, or privileged imports. Only a separately granted `python.sqlite-eval` script may persist bounded SQL. Child shell scripts are available only through the scoped spawn handle
 and the host's existing authority.
 
 ## Validation
@@ -329,6 +343,9 @@ Formatting, clippy, `cargo deny`, the reproducible component build, and the test
 gated by the shared `ci / validate` workflow rather than local scripts; see [Build](#build) for
 the local build and test commands. Component tests require `DEKOPON_PROVIDER_COMPONENT` and fail
 when it is unset; their contract assertions require `python3` and the pinned `wasm-tools`.
+`tests/storage_shared.rs` also loads the Turso SQL v0.7.0 release component: with
+`DEKOPON_TURSO_COMPONENT` unset it fetches the release asset with `curl` and fails unless its
+SHA-256 matches the pinned sidecar digest. Set the variable to test an unreleased Turso build.
 
 ## License and corresponding source
 

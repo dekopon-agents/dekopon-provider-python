@@ -9,6 +9,7 @@ mod numeric;
 mod policy;
 #[cfg(feature = "http")]
 mod requests;
+mod sqlite;
 #[cfg(feature = "http")]
 mod subshell;
 #[cfg(feature = "tables")]
@@ -38,7 +39,7 @@ pub(crate) const COMMAND_WORD: &str = "python";
 pub struct PythonProvider;
 /// Execute one script in a fresh constrained interpreter.
 pub struct Eval;
-/// Separately authorized persistent SQL evaluation (the SQL facade lands in S2b).
+/// Separately authorized persistent SQL evaluation.
 pub struct SqliteEval;
 
 /// An exact, bounded script or an authorized request to read the script from stdin.
@@ -98,51 +99,28 @@ impl Capability for Eval {
     type Error = PythonError;
 
     fn run(
-        mut input: Self::Input,
+        input: Self::Input,
         (http, clock, monotonic, random, spawn): Self::Needs,
         out: &mut Stdout,
     ) -> Result<(), Self::Error> {
-        if input.stdin_script {
-            // Marker is proposal data, never pre-authorization script data.
-            if !input.script.is_empty() {
-                return Err(PythonError::new(
-                    Code::INVALID_INPUT,
-                    "stdin script cannot contain inline code",
-                ));
-            }
-            let pipe = provider::stdin()
-                .ok_or_else(|| PythonError::new(Code::USAGE, "python -: nothing was piped in"))?;
-            let mut raw = Vec::new();
-            pipe.take((SCRIPT_BYTES + 1) as u64)
-                .read_to_end(&mut raw)
-                .map_err(|_| PythonError::new(Code::USAGE, "python -: invalid piped script"))?;
-            if raw.len() > SCRIPT_BYTES {
-                return Err(PythonError::new(
-                    Code::new("input-too-large"),
-                    format!("script exceeds {SCRIPT_BYTES} UTF-8 bytes"),
-                ));
-            }
-            input.script = String::from_utf8(raw)
-                .map_err(|_| PythonError::new(Code::USAGE, "python -: invalid UTF-8 script"))?;
-        }
-        if input.script.len() > SCRIPT_BYTES {
-            return Err(PythonError::new(
-                Code::new("input-too-large"),
-                format!("script exceeds {SCRIPT_BYTES} UTF-8 bytes"),
-            ));
-        }
+        let pipe = if input.stdin_script {
+            provider::stdin()
+        } else {
+            None
+        };
+        let script = read_script(input, pipe, false)?;
         let _entropy = entropy::EntropyScope::install(random);
         let result = time::with_clocks(clock, monotonic, || {
             #[cfg(feature = "http")]
             {
                 requests::with_http(http, || {
-                    subshell::with_spawn(spawn, || eval::evaluate(&input.script))
+                    subshell::with_spawn(spawn, || eval::evaluate(&script))
                 })
             }
             #[cfg(not(feature = "http"))]
             {
                 let _ = (http, spawn);
-                eval::evaluate(&input.script)
+                eval::evaluate(&script)
             }
         });
         let mut json = serde_json::to_vec(&result).map_err(|_| {
@@ -161,8 +139,6 @@ impl Capability for Eval {
     }
 }
 
-// Until the bounded sqlite3 facade lands, fail closed after authorization, without
-// ever opening the namespace database. In particular this cannot widen python.eval.
 impl Capability for SqliteEval {
     type Provider = PythonProvider;
     const NAME: &'static str = "sqlite-eval";
@@ -171,33 +147,71 @@ impl Capability for SqliteEval {
     const EFFECT: EffectKind = EffectKind::LocalWrite;
     const RISK: RiskLevel = RiskLevel::High;
     type Input = EvalInput;
-    type Needs = (Storage<DurableFiles>, Http, Clock, Monotonic, Random, Spawn);
+    type Needs = (Storage<DurableFiles>, Clock, Monotonic, Random);
     type Error = PythonError;
 
-    fn run(input: Self::Input, needs: Self::Needs, _out: &mut Stdout) -> Result<(), Self::Error> {
+    fn run(
+        input: Self::Input,
+        (storage, clock, monotonic, random): Self::Needs,
+        out: &mut Stdout,
+    ) -> Result<(), Self::Error> {
         let pipe = if input.stdin_script {
             provider::stdin()
         } else {
             None
         };
-        let _script = validate_sql_script(input, pipe)?;
-        // Materialize the declared durable-files import in the built component. This
-        // read-only probe neither opens nor creates the database; S2b replaces it
-        // with the shared adapter's with_database entry point.
-        let _ = needs.0.stat(dekopon_turso_sql_io::DATABASE);
-        Err(PythonError::new(
-            Code::new("unsupported"),
-            "sqlite3 is not available in this build",
-        ))
+        let script = read_script(input, pipe, true)?;
+        let _entropy = entropy::EntropyScope::install(random);
+        let result = time::with_clocks(clock, monotonic, || {
+            dekopon_turso_sql_io::with_database(
+                storage,
+                |stage, detail| {
+                    PythonError::new(
+                        Code::new("sql-error"),
+                        format!("sqlite {stage} failed: {detail}"),
+                    )
+                },
+                |connection, engine| {
+                    sqlite::with_connection(connection, engine, || eval::evaluate_sql(&script))
+                        .map_err(|detail| {
+                            PythonError::new(
+                                Code::new("sql-error"),
+                                format!("sqlite rollback failed: {detail}"),
+                            )
+                        })
+                },
+            )
+        })?;
+        let mut json = serde_json::to_vec(&result).map_err(|_| {
+            PythonError::new(
+                Code::new("serialization-failed"),
+                "python response could not be serialized",
+            )
+        })?;
+        json.push(b'\n');
+        out.write_all(&json).map_err(|_| {
+            PythonError::new(
+                Code::new("write-failed"),
+                "python output could not be written",
+            )
+        })
     }
 }
 
 // Validation is deliberately independent of the storage handle: even an ungranted
 // storage host must see the input error before any durable-files import is called.
-fn validate_sql_script(
+fn read_script(
     mut input: EvalInput,
     pipe: Option<impl Read>,
+    sql: bool,
 ) -> Result<String, PythonError> {
+    let usage = Code::USAGE;
+    let too_large = if sql {
+        Code::INVALID_INPUT
+    } else {
+        Code::new("input-too-large")
+    };
+    let command = if sql { "python sql -" } else { "python -" };
     if input.stdin_script {
         if !input.script.is_empty() {
             return Err(PythonError::new(
@@ -206,26 +220,23 @@ fn validate_sql_script(
             ));
         }
         let mut raw = Vec::new();
-        pipe.ok_or_else(|| {
-            PythonError::new(Code::INVALID_INPUT, "python sql -: nothing was piped in")
-        })?
-        .take((SCRIPT_BYTES + 1) as u64)
-        .read_to_end(&mut raw)
-        .map_err(|_| PythonError::new(Code::INVALID_INPUT, "python sql -: invalid piped script"))?;
+        pipe.ok_or_else(|| PythonError::new(usage, format!("{command}: nothing was piped in")))?
+            .take((SCRIPT_BYTES + 1) as u64)
+            .read_to_end(&mut raw)
+            .map_err(|_| PythonError::new(usage, format!("{command}: invalid piped script")))?;
         if raw.len() > SCRIPT_BYTES {
             return Err(PythonError::new(
-                Code::INVALID_INPUT,
-                "script exceeds UTF-8 byte limit",
+                too_large,
+                format!("script exceeds {SCRIPT_BYTES} UTF-8 bytes"),
             ));
         }
-        input.script = String::from_utf8(raw).map_err(|_| {
-            PythonError::new(Code::INVALID_INPUT, "python sql -: invalid UTF-8 script")
-        })?;
+        input.script = String::from_utf8(raw)
+            .map_err(|_| PythonError::new(usage, format!("{command}: invalid UTF-8 script")))?;
     }
     if input.script.len() > SCRIPT_BYTES {
         return Err(PythonError::new(
-            Code::INVALID_INPUT,
-            "script exceeds UTF-8 byte limit",
+            too_large,
+            format!("script exceeds {SCRIPT_BYTES} UTF-8 bytes"),
         ));
     }
     Ok(input.script)
@@ -233,19 +244,31 @@ fn validate_sql_script(
 
 #[cfg(test)]
 mod sql_input_tests {
-    use super::{EvalInput, validate_sql_script};
+    use super::{EvalInput, read_script};
     use dekopon_provider_sdk::provider::{Code, Failure};
     use std::io::Cursor;
 
     #[test]
-    fn invalid_piped_sql_returns_typed_invalid_input_before_storage() {
+    fn piped_sql_errors_match_eval_usage_and_bound_input_before_storage() {
         let input = || EvalInput {
             script: String::new(),
             stdin_script: true,
         };
-        for pipe in [None, Some(vec![b'x'; 65_537]), Some(vec![0xff])] {
-            let result = validate_sql_script(input(), pipe.map(Cursor::new));
-            assert_eq!(result.unwrap_err().code(), Code::INVALID_INPUT);
+        assert_eq!(
+            read_script(input(), None::<Cursor<Vec<u8>>>, false)
+                .unwrap_err()
+                .code(),
+            read_script(input(), None::<Cursor<Vec<u8>>>, true)
+                .unwrap_err()
+                .code(),
+        );
+        for (pipe, code) in [
+            (None, Code::USAGE),
+            (Some(vec![b'x'; 65_537]), Code::INVALID_INPUT),
+            (Some(vec![0xff]), Code::USAGE),
+        ] {
+            let result = read_script(input(), pipe.map(Cursor::new), true);
+            assert_eq!(result.unwrap_err().code(), code);
         }
     }
 }

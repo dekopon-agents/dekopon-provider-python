@@ -98,7 +98,7 @@ fn input_bound_and_invalid_input_are_rejected_before_vm_or_http() {
 }
 
 #[test]
-fn sql_grant_cannot_expand_old_eval_and_unfinished_facade_fails_closed() {
+fn sql_grant_cannot_expand_old_eval_and_ungranted_storage_fails_closed() {
     let path = component();
     let old = Harness::<PythonProvider>::get(&path)
         .call("python.eval", json!({"script":"import sqlite3"}))
