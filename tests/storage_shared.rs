@@ -1,6 +1,7 @@
 //! Two real components, one owner-selected agent namespace, distinct invocations.
 use dekopon_broker_host_shared::{
-    BrokerHostLimits, BrokerProviderRegistry, Streams, asset::AssetInputs,
+    BrokerHostLimits, BrokerHostOptions, BrokerProviderRegistry, CompiledCacheMode, Streams,
+    asset::AssetInputs,
 };
 use dekopon_broker_shared::{
     Broker, BrokerBuildError, BrokerLimits, ConstraintCatalog, ConstraintSet, CredentialStore,
@@ -314,11 +315,17 @@ async fn broker_config_load_checks_local_null_invalid_and_conflicting_namespaces
             path("DEKOPON_TURSO_COMPONENT"),
         ]
     };
+    let compiled = BrokerHostOptions {
+        cwasm_dir: Some(root.path().canonicalize().unwrap().join("cwasm")),
+        compiled_cache_mode: CompiledCacheMode::Publisher,
+        ..BrokerHostOptions::default()
+    };
     let load = || {
-        BrokerProviderRegistry::load_with_storage(
+        BrokerProviderRegistry::load_with_options(
             sources(),
             BrokerHostLimits::default(),
             Some(host.clone()),
+            &compiled,
         )
     };
     let options = |namespace: Value| {
