@@ -48,6 +48,7 @@ dekopon-broker-shared = { package = "dekopon-broker", version = "=0.47.0" }
 dekopon-capability-shared = { package = "dekopon-capability", version = "=0.47.0" }
 dekopon-core-shared = { package = "dekopon-core", version = "=0.47.0" }
 dekopon-storage-host-shared = { package = "dekopon-storage-host", version = "=0.47.0" }
+sha2 = "=0.11.0"
 tempfile = "=3.27.0"
 tokio = { version = "=1.52.4", default-features = false, features = ["macros", "rt-multi-thread", "sync"] }
 

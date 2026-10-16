@@ -339,6 +339,9 @@ Formatting, clippy, `cargo deny`, the reproducible component build, and the test
 gated by the shared `ci / validate` workflow rather than local scripts; see [Build](#build) for
 the local build and test commands. Component tests require `DEKOPON_PROVIDER_COMPONENT` and fail
 when it is unset; their contract assertions require `python3` and the pinned `wasm-tools`.
+`tests/storage_shared.rs` also loads the Turso SQL v0.7.0 release component: with
+`DEKOPON_TURSO_COMPONENT` unset it fetches the release asset with `curl` and fails unless its
+SHA-256 matches the pinned sidecar digest. Set the variable to test an unreleased Turso build.
 
 ## License and corresponding source
 

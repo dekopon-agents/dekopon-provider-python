@@ -25,10 +25,61 @@ use std::sync::{
 };
 static INVOCATION: AtomicU64 = AtomicU64::new(0);
 
+// Turso SQL's release workflow builds and attests this asset; the digest is its .sha256 sidecar.
+const TURSO_RELEASE_URL: &str = "https://github.com/dekopon-agents/dekopon-provider-turso-sql/releases/download/v0.7.0/turso-sql-provider.wasm";
+const TURSO_RELEASE_SHA256: &str =
+    "5242f5441f41db7e84a763bcaffcb8e5b02e03035ca548d671a549a6a3fd2f40";
+
 fn path(name: &str) -> std::path::PathBuf {
     std::env::var_os(name)
         .unwrap_or_else(|| panic!("{name} required for built-component storage test"))
         .into()
+}
+
+fn sha256_hex(path: &std::path::Path) -> std::io::Result<String> {
+    use sha2::Digest;
+    let digest = sha2::Sha256::digest(std::fs::read(path)?);
+    Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
+fn turso_component() -> std::path::PathBuf {
+    static RELEASED: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+    if let Some(path) = std::env::var_os("DEKOPON_TURSO_COMPONENT") {
+        return path.into();
+    }
+    RELEASED
+        .get_or_init(|| {
+            let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("turso-sql-release");
+            std::fs::create_dir_all(&dir).unwrap();
+            let cached = dir.join(format!("{TURSO_RELEASE_SHA256}.wasm"));
+            if sha256_hex(&cached).is_ok_and(|digest| digest == TURSO_RELEASE_SHA256) {
+                return cached;
+            }
+            let partial = dir.join(format!("download-{}.part", std::process::id()));
+            let status = std::process::Command::new("curl")
+                .args([
+                    "-fsSL",
+                    "--retry",
+                    "3",
+                    "--proto",
+                    "=https",
+                    "--tlsv1.2",
+                    "-o",
+                ])
+                .arg(&partial)
+                .arg(TURSO_RELEASE_URL)
+                .status()
+                .expect("curl fetches the released Turso SQL component");
+            assert!(status.success(), "curl {TURSO_RELEASE_URL}: {status}");
+            let digest = sha256_hex(&partial).unwrap();
+            assert_eq!(
+                digest, TURSO_RELEASE_SHA256,
+                "released Turso SQL component digest"
+            );
+            std::fs::rename(&partial, &cached).unwrap();
+            cached
+        })
+        .clone()
 }
 
 fn grant(
@@ -309,12 +360,7 @@ async fn broker_config_load_checks_local_null_invalid_and_conflicting_namespaces
         StorageLimits::default(),
     )
     .unwrap();
-    let sources = || {
-        [
-            path("DEKOPON_PROVIDER_COMPONENT"),
-            path("DEKOPON_TURSO_COMPONENT"),
-        ]
-    };
+    let sources = || [path("DEKOPON_PROVIDER_COMPONENT"), turso_component()];
     let compiled = BrokerHostOptions {
         cwasm_dir: Some(root.path().canonicalize().unwrap().join("cwasm")),
         compiled_cache_mode: CompiledCacheMode::Publisher,
@@ -436,10 +482,7 @@ async fn built_python_and_turso_cross_read_persisted_rows_both_directions() {
     )
     .unwrap();
     let registry = BrokerProviderRegistry::load_with_storage(
-        [
-            path("DEKOPON_PROVIDER_COMPONENT"),
-            path("DEKOPON_TURSO_COMPONENT"),
-        ],
+        [path("DEKOPON_PROVIDER_COMPONENT"), turso_component()],
         BrokerHostLimits::default(),
         Some(host.clone()),
     )
