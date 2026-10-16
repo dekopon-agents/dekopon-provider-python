@@ -520,8 +520,8 @@ async fn built_python_and_turso_cross_read_persisted_rows_both_directions() {
         json!([[1, 7, 1.25, "label", "626C6F62", null], [1]]),
         "{bind}"
     );
-    // Eight separately checkpointed Python commits would exceed the host's 256 KiB read
-    // ceiling if 64 KiB WAL frames accumulated instead of being truncated on return.
+    // Without checkpoints, accumulated 64 KiB WAL frames exceed the host's per-call read
+    // ceiling; reopen can silently miss frames, so assert the row count, not just success.
     for index in 0..8 {
         let p = run("python", "python.sqlite-eval", python(&format!("import sqlite3\nc=sqlite3.connect()\nc.execute('INSERT INTO note (body) VALUES (?)', ('checkpoint-{index}',))\nc.commit()\nc.close()")))
             .await.expect("checkpointed Python write");
@@ -531,6 +531,46 @@ async fn built_python_and_turso_cross_read_persisted_rows_both_directions() {
         .await
         .expect("WAL does not accumulate past the read ceiling");
     assert_eq!(reopened["results"][0]["rows"][0][0], 10, "{reopened}");
+    // The VM error and stdout must survive cleanup; the next built Turso invocation
+    // must reopen successfully with no uncommitted row or stranded WAL frames.
+    let failed = run("python", "python.sqlite-eval", python("import sqlite3\nc=sqlite3.connect()\nc.execute(\"INSERT INTO note (body) VALUES ('discard after error')\")\nprint('before division')\n1/0"))
+        .await.expect("Python exception after write");
+    assert_eq!(failed["error"]["type"], "ZeroDivisionError", "{failed}");
+    assert_eq!(failed["stdout"], "before division\n", "{failed}");
+    let after_error = run("turso", "turso.exec", turso(&["SELECT count(*) FROM note"]))
+        .await
+        .expect("Turso reopens after Python exception");
+    assert_eq!(after_error["results"][0]["rows"][0][0], 10, "{after_error}");
+    let forgotten = run("python", "python.sqlite-eval", python("import sqlite3\nc=sqlite3.connect()\nc.execute(\"INSERT INTO note (body) VALUES ('kept commit')\")\nc.commit()\nc.execute(\"INSERT INTO note (body) VALUES ('discard at exit')\")\nresult='complete'"))
+        .await.expect("normal exit with forgotten commit");
+    assert_eq!(forgotten["ok"], true, "{forgotten}");
+    assert_eq!(forgotten["result"], "complete", "{forgotten}");
+    let after_exit = run(
+        "turso",
+        "turso.exec",
+        turso(&[
+            "SELECT body FROM note ORDER BY id DESC LIMIT 1",
+            "SELECT count(*) FROM note",
+        ]),
+    )
+    .await
+    .expect("Turso reopens committed frame after implicit rollback");
+    assert_eq!(
+        after_exit["results"][0]["rows"][0][0], "kept commit",
+        "{after_exit}"
+    );
+    assert_eq!(after_exit["results"][1]["rows"][0][0], 11, "{after_exit}");
+    let sql_subset = run("python", "python.sqlite-eval", python("import sqlite3\nc=sqlite3.connect()\nresult=c.execute('SELECT 1 -- ; comment').fetchone()\nc.close()\nc.close()"))
+        .await.expect("SQL parser comment and idempotent close");
+    assert_eq!(sql_subset["result"], json!([1]), "{sql_subset}");
+    let extra = run(
+        "python",
+        "python.sqlite-eval",
+        python("import sqlite3\nc=sqlite3.connect()\nc.execute('SELECT 1; SELECT 2')"),
+    )
+    .await
+    .expect("two SQL statements refused");
+    assert_eq!(extra["error"]["type"], "ValueError", "{extra}");
     let denied = run("python", "python.eval", python("import sqlite3"))
         .await
         .expect("old capability executes without SQL import");
@@ -573,7 +613,7 @@ async fn built_python_and_turso_cross_read_persisted_rows_both_directions() {
         .await
         .unwrap();
         assert_eq!(
-            unchanged["results"][0]["rows"][0][0], 10,
+            unchanged["results"][0]["rows"][0][0], 11,
             "{name}: {unchanged}"
         );
         assert_eq!(
@@ -601,7 +641,7 @@ async fn built_python_and_turso_cross_read_persisted_rows_both_directions() {
     )
     .await
     .unwrap();
-    assert_eq!(unchanged["results"][0]["rows"][0][0], 10, "{unchanged}");
+    assert_eq!(unchanged["results"][0]["rows"][0][0], 11, "{unchanged}");
     assert_eq!(unchanged["results"][1]["rows"][0][0], 0, "{unchanged}");
     for script in [
         "cursor=c.execute('SELECT 1')\nc.close()\ncursor.fetchone()",

@@ -165,13 +165,20 @@ impl Capability for SqliteEval {
         let result = time::with_clocks(clock, monotonic, || {
             dekopon_turso_sql_io::with_database(
                 storage,
-                |stage, _detail| {
-                    PythonError::new(Code::new("sql-error"), format!("sqlite {stage} failed"))
+                |stage, detail| {
+                    PythonError::new(
+                        Code::new("sql-error"),
+                        format!("sqlite {stage} failed: {detail}"),
+                    )
                 },
                 |connection, engine| {
-                    Ok(sqlite::with_connection(connection, engine, || {
-                        eval::evaluate_sql(&script)
-                    }))
+                    sqlite::with_connection(connection, engine, || eval::evaluate_sql(&script))
+                        .map_err(|detail| {
+                            PythonError::new(
+                                Code::new("sql-error"),
+                                format!("sqlite rollback failed: {detail}"),
+                            )
+                        })
                 },
             )
         })?;
@@ -198,11 +205,7 @@ fn read_script(
     pipe: Option<impl Read>,
     sql: bool,
 ) -> Result<String, PythonError> {
-    let usage = if sql {
-        Code::INVALID_INPUT
-    } else {
-        Code::USAGE
-    };
+    let usage = Code::USAGE;
     let too_large = if sql {
         Code::INVALID_INPUT
     } else {
@@ -246,14 +249,26 @@ mod sql_input_tests {
     use std::io::Cursor;
 
     #[test]
-    fn invalid_piped_sql_returns_typed_invalid_input_before_storage() {
+    fn piped_sql_errors_match_eval_usage_and_bound_input_before_storage() {
         let input = || EvalInput {
             script: String::new(),
             stdin_script: true,
         };
-        for pipe in [None, Some(vec![b'x'; 65_537]), Some(vec![0xff])] {
+        assert_eq!(
+            read_script(input(), None::<Cursor<Vec<u8>>>, false)
+                .unwrap_err()
+                .code(),
+            read_script(input(), None::<Cursor<Vec<u8>>>, true)
+                .unwrap_err()
+                .code(),
+        );
+        for (pipe, code) in [
+            (None, Code::USAGE),
+            (Some(vec![b'x'; 65_537]), Code::INVALID_INPUT),
+            (Some(vec![0xff]), Code::USAGE),
+        ] {
             let result = read_script(input(), pipe.map(Cursor::new), true);
-            assert_eq!(result.unwrap_err().code(), Code::INVALID_INPUT);
+            assert_eq!(result.unwrap_err().code(), code);
         }
     }
 }

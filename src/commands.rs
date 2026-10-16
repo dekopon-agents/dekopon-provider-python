@@ -71,6 +71,9 @@ pub struct Python {
 #[derive(Subcommand)]
 enum PythonCommand {
     /// Persistent SQL (requires python.sqlite-eval)
+    #[command(
+        after_help = "sqlite3 subset: connect() is pathless; execute(sql, tuple) runs one statement; fetchone()/fetchall() return at most 256 rows / 128 KiB per statement; commit(), rollback(), close() manage pending writes. dekopon_requests and dekopon_subshell import when built but calls raise 'http not granted' / 'spawn not granted' under this capability."
+    )]
     Sql {
         /// Run CODE as the SQL-capable Python script
         #[arg(short = 'c', value_name = "CODE", allow_hyphen_values = true)]
@@ -210,6 +213,28 @@ mod tests {
                 .starts_with("Run one Python 3 script in a fresh, import-free RustPython 0.5.0 VM"),
             "{stdout}"
         );
+        let CommandRunOutcome::Rendered {
+            status: 0,
+            stdout: sql_help,
+            ..
+        } = command(&["sql", "--help"], false)
+        else {
+            panic!("expected safe SQL help")
+        };
+        for phrase in [
+            "connect()",
+            "execute(sql, tuple)",
+            "fetchone()",
+            "fetchall()",
+            "commit()",
+            "rollback()",
+            "close()",
+            "256 rows / 128 KiB",
+            "http not granted",
+            "spawn not granted",
+        ] {
+            assert!(sql_help.contains(phrase), "{phrase}: {sql_help}");
+        }
         for phrase in [
             "sql",
             "RustPython 0.5.0",

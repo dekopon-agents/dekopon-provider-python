@@ -20,7 +20,7 @@ pub(crate) fn with_connection<T>(
     connection: &Arc<Connection>,
     engine: &Arc<dyn IO>,
     run: impl FnOnce() -> T,
-) -> T {
+) -> Result<T, String> {
     struct Reset;
     impl Drop for Reset {
         fn drop(&mut self) {
@@ -29,7 +29,13 @@ pub(crate) fn with_connection<T>(
     }
     CURRENT.with(|cell| *cell.borrow_mut() = Some((Arc::clone(connection), Arc::clone(engine))));
     let _reset = Reset;
-    run()
+    let result = run();
+    // The VM can exit with a live write transaction on either success or exception.
+    // Discard it before the shared adapter checkpoints committed WAL frames.
+    if !connection.get_auto_commit() {
+        run_sql_raw(connection, engine, "ROLLBACK")?;
+    }
+    Ok(result)
 }
 
 pub(crate) fn active() -> bool {
@@ -63,13 +69,15 @@ pub(crate) mod sqlite_module {
     #[derive(Debug, PyPayload)]
     pub(crate) struct SqlConnection {
         closed: Rc<Cell<bool>>,
-        transaction: Cell<bool>,
     }
 
     #[pyclass]
     impl SqlConnection {
         #[pymethod]
         fn close(&self, vm: &VirtualMachine) -> PyResult<()> {
+            if self.closed.get() {
+                return Ok(());
+            }
             self.rollback(vm)?;
             self.closed.set(true);
             Ok(())
@@ -110,10 +118,7 @@ pub(crate) mod sqlite_module {
                 .or_else(|| parameters.kwargs.get("parameters"))
                 .map(|p| PyTupleRef::try_from_object(vm, p.clone()))
                 .transpose()?;
-            // Refuse bad arguments before touching the broker's durable files.
-            if sql_has_multiple_statements(sql.as_str()) {
-                return Err(vm.new_value_error("execute accepts one statement"));
-            }
+            // Validate parameters before preparing against broker-owned durable files.
             if let Some(params) = &params {
                 if params.len() > 64 {
                     return Err(vm.new_value_error("too many parameters"));
@@ -136,7 +141,7 @@ pub(crate) mod sqlite_module {
                 return Err(vm.new_value_error("parameter count mismatch"));
             }
             drop(stmt);
-            if !self.transaction.get()
+            if connection.get_auto_commit()
                 && ["insert", "update", "delete", "replace"].contains(
                     &sql.as_str()
                         .split_whitespace()
@@ -147,7 +152,6 @@ pub(crate) mod sqlite_module {
                 )
             {
                 run_sql(&connection, &self.connection(vm)?.1, "BEGIN", vm)?;
-                self.transaction.set(true);
             }
             let mut stmt = connection
                 .prepare(sql.as_str())
@@ -205,10 +209,9 @@ pub(crate) mod sqlite_module {
         }
         fn finish_transaction(&self, statement: &str, vm: &VirtualMachine) -> PyResult<()> {
             self.ensure_open(vm)?;
-            if self.transaction.get() {
-                let (connection, engine) = self.connection(vm)?;
+            let (connection, engine) = self.connection(vm)?;
+            if !connection.get_auto_commit() {
                 run_sql(&connection, &engine, statement, vm)?;
-                self.transaction.set(false);
             }
             Ok(())
         }
@@ -278,32 +281,8 @@ pub(crate) mod sqlite_module {
         }
         Ok(SqlConnection {
             closed: Rc::new(Cell::new(false)),
-            transaction: Cell::new(false),
         })
     }
-}
-
-// Conservative lexical gate: semicolons within quoted SQL strings/identifiers are data;
-// any nontrivial suffix after a statement separator is forbidden before storage is opened.
-fn sql_has_multiple_statements(sql: &str) -> bool {
-    let mut quoted = None;
-    let mut chars = sql.chars().peekable();
-    while let Some(ch) = chars.next() {
-        if let Some(quote) = quoted {
-            if ch == quote {
-                if chars.peek() == Some(&quote) {
-                    chars.next();
-                } else {
-                    quoted = None;
-                }
-            }
-        } else if ch == '\'' || ch == '"' || ch == '`' {
-            quoted = Some(ch);
-        } else if ch == ';' {
-            return chars.any(|rest| !rest.is_whitespace() && rest != ';');
-        }
-    }
-    false
 }
 
 fn value_size(value: &Value) -> usize {
@@ -330,19 +309,23 @@ fn run_sql(
     sql: &str,
     vm: &VirtualMachine,
 ) -> PyResult<()> {
-    let mut stmt = connection
-        .prepare(sql)
-        .map_err(|_| vm.new_value_error("transaction prepare failed"))?;
+    run_sql_raw(connection, engine, sql)
+        .map_err(|detail| vm.new_value_error(format!("transaction {sql} failed: {detail}")))
+}
+
+fn run_sql_raw(
+    connection: &Arc<Connection>,
+    engine: &Arc<dyn IO>,
+    sql: &str,
+) -> Result<(), String> {
+    let mut stmt = connection.prepare(sql).map_err(|error| error.to_string())?;
     loop {
-        match stmt
-            .step()
-            .map_err(|_| vm.new_value_error("transaction failed"))?
-        {
+        match stmt.step().map_err(|error| error.to_string())? {
             StepResult::Done => return Ok(()),
-            StepResult::IO => engine
-                .step()
-                .map_err(|_| vm.new_value_error("transaction I/O failed"))?,
-            _ => return Err(vm.new_value_error("transaction busy or interrupted")),
+            StepResult::IO => engine.step().map_err(|error| error.to_string())?,
+            StepResult::Busy => return Err("busy".to_owned()),
+            StepResult::Interrupt => return Err("interrupted".to_owned()),
+            _ => return Err("unexpected transaction step".to_owned()),
         }
     }
 }
@@ -383,15 +366,4 @@ fn parameter(param: &rustpython_vm::PyObjectRef, vm: &VirtualMachine) -> PyResul
         return Ok(Value::from_blob(bytes.to_vec()));
     }
     Err(vm.new_type_error("unsupported SQL parameter"))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::sql_has_multiple_statements;
-    #[test]
-    fn rejects_second_sql_statement_without_rejecting_semicolons_in_literals() {
-        assert!(sql_has_multiple_statements("SELECT 1; DELETE FROM note"));
-        assert!(!sql_has_multiple_statements("SELECT ';'"));
-        assert!(!sql_has_multiple_statements("SELECT 1;"));
-    }
 }

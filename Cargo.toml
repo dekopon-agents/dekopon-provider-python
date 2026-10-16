@@ -23,7 +23,7 @@ clap = { version = "=4.6.6", features = ["derive"] }
 dekopon-provider-sdk = "=0.33.0"
 dekopon-turso-sql-io = { git = "https://github.com/dekopon-agents/dekopon-provider-turso-sql", rev = "fd7b092f32fd2e6b65811a380f5edc28b06be451", default-features = false }
 getrandom02 = { package = "getrandom", version = "=0.2.17", features = ["custom"] }
-getrandom04 = { package = "getrandom", version = "0.4" }
+getrandom04 = { package = "getrandom", version = "=0.4.3" }
 datafusion = { git = "https://github.com/dekopon-agents/datafusion.git", rev = "cf3778098ad3ea283ecd8ee2a991be7d9a29750c", default-features = false, optional = true, features = ["sql", "dekopon-wasm", "string_expressions", "datetime_expressions"] }
 ndarray = { version = "=0.17.2", default-features = false, features = ["std"] }
 statrs = { version = "=0.19.1", default-features = false, features = ["std"] }

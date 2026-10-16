@@ -148,13 +148,17 @@ The script reader bounds bytes and validates UTF-8 only after authorization; `-c
 as program data rather than interpreting it as script. `python sql -c CODE` (or `python sql -`
 with piped input) proposes the separate local-write `python.sqlite-eval` grant. Only this
 capability can import `sqlite3`; `connect()` accepts no path or URI and uses the broker-owned
-`main.db`. `execute(sql, tuple_of_parameters)` supports None, integer and text parameters;
-`fetchone()` and `fetchall()` return bounded rows; `commit()`, `rollback()`, and `close()`
-finish or discard pending writes. Close invalidates the connection and cursors. The
-adapter checkpoints the WAL on every invocation. Grant `storage` to `python.sqlite-eval` with
-`scope: agent` and `namespace: turso` to share data with `turso.exec`. Keep `http` grants under
-`python.eval`; storage and HTTP constraints cannot be combined on one invocation. An absent or
-null namespace instead selects Python-local storage. Existing `python.eval` grants cannot
+`main.db`. `execute(sql, tuple_of_parameters)` supports None, bool, integer, float, text and
+bytes parameters; `fetchone()` and `fetchall()` return bounded rows; `commit()`, `rollback()`,
+and `close()` finish or discard pending writes. An uncommitted transaction is rolled back
+at script end (including on an exception); close invalidates the connection and cursors.
+The adapter checkpoints committed WAL frames on every invocation. Grant `storage` to
+`python.sqlite-eval` with `scope: agent` and `namespace: turso` to share data with
+`turso.exec`. In a deployed python.yaml with provider-level `http`, move that block under
+`python.eval:` before adding `python.sqlite-eval`; capability 0.47.0 refuses HTTP and storage
+constraints on one capability. Spawn is deliberately omitted from `python.sqlite-eval`:
+a child `turso exec` on the same namespace could wait on the parent's storage lock.
+An absent or null namespace instead selects Python-local storage. Existing `python.eval` grants cannot
 invoke SQL, and `python -c` still cannot import `sqlite3`. The shipped Python and Turso
 components use provider SDK 0.33.0; the cross-provider storage test uses published broker-host
 0.47.0 (its typed testkit cannot accept SDK 0.33.0's Provider trait). Deployment must supply
@@ -316,7 +320,7 @@ separately granted `python.sqlite-eval` persists bounded SQL in broker-owned `ma
 ## Denied authority and determinism
 
 The exact component contract allows only Dekopon stdio, HTTP 1.1, wall and monotonic clocks,
-OS entropy, and spawn 0.1. There is no WASI, JS/browser, host environment, filesystem, raw
+OS entropy, spawn 0.1, and `dekopon:storage/durable-files@0.1.1` (only for `python.sqlite-eval`). There is no WASI, JS/browser, host environment, filesystem, raw
 socket, arbitrary filesystem storage, OS subprocess, dynamic loading, or generic provider dispatch. Entropy is a broker import; the clocks back `time` only during invocation. Imports including `sys`, `os`, `random`, `secrets`, `socket`,
 `ssl`, `subprocess`, `threading`, `ctypes`, `tkinter`, and `webbrowser` are denied.
 `open`, `input`, and `breakpoint` are absent; guest `compile`, `eval`, and `exec` are denied.
