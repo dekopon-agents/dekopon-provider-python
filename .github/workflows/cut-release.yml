@@ -3,16 +3,30 @@ name: Cut release
 on:
   workflow_dispatch:
     inputs:
-      version:
-        description: The version to release, without the v (1.2.3 or 1.2.3-rc.1)
+      tags:
+        description: Space-separated tags to create on one commit
         type: string
         required: true
+      sha:
+        description: The commit on main to tag; empty means main's HEAD
+        type: string
+        default: ""
+      dry_run:
+        description: Check and create the tags without pushing them
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
 
 jobs:
   cut:
-    uses: dekopon-agents/provider-workflows/.github/workflows/cut-release.yml@c8404236c18bcff3e089677e99ec3075d14b5679 # v4
-    permissions:
-      contents: write
+    uses: dekopon-agents/provider-workflows/.github/workflows/cut-release.yml@main
     with:
-      version: ${{ inputs.version }}
-    secrets: inherit
+      tags: ${{ inputs.tags }}
+      sha: ${{ inputs.sha }}
+      package: dekopon-python-provider
+      dry_run: ${{ inputs.dry_run }}
+    secrets:
+      DEKOPON_RELEASE_APP_ID: ${{ secrets.DEKOPON_RELEASE_APP_ID }}
+      DEKOPON_RELEASE_APP_KEY: ${{ secrets.DEKOPON_RELEASE_APP_KEY }}
