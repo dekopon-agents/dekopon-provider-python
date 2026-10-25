@@ -36,7 +36,7 @@ datafusion = { git = "https://github.com/dekopon-agents/datafusion.git", rev = "
 ndarray = { version = "=0.17.2", default-features = false, features = ["std"] }
 statrs = { version = "=0.19.1", default-features = false, features = ["std"] }
 smartcore = { version = "=0.6.14", default-features = false }
-tokio = { version = "=1.52.4", default-features = false, optional = true, features = ["rt"] }
+tokio = { version = "=1.53.3", default-features = false, optional = true, features = ["rt"] }
 schemars = "=1.2.2"
 getrandom = "=0.3.4"
 num-traits = "=0.2.19"
@@ -58,7 +58,7 @@ dekopon-core-shared = { package = "dekopon-core", version = "=0.47.0" }
 dekopon-storage-host-shared = { package = "dekopon-storage-host", version = "=0.47.0" }
 sha2 = "=0.11.0"
 tempfile = "=3.27.0"
-tokio = { version = "=1.52.4", default-features = false, features = ["macros", "rt-multi-thread", "sync"] }
+tokio = { version = "=1.53.3", default-features = false, features = ["macros", "rt-multi-thread", "sync"] }
 
 [patch.crates-io]
 datafusion-catalog = { git = "https://github.com/dekopon-agents/datafusion.git", rev = "cf3778098ad3ea283ecd8ee2a991be7d9a29750c" }
