@@ -56,6 +56,18 @@ fn main() {
         "if t < max_fold_seconds and sys.platform.startswith(\"win\"):",
         "if False:  # UTC has no Windows local-time restriction",
     );
+    // These legacy readers still work, without runtime imports after the guest guard.
+    for _ in 0..2 {
+        let start = datetime
+            .find("        import warnings\n        warnings.warn(")
+            .unwrap();
+        let end = start
+            + datetime[start..]
+                .find("                      stacklevel=2)\n")
+                .unwrap()
+            + "                      stacklevel=2)\n".len();
+        datetime.replace_range(start..end, "");
+    }
     fs::write(frozen.join("_pydatetime.py"), datetime).unwrap();
     fs::copy("src/python/time.py", frozen.join("time.py")).unwrap();
     fs::write(

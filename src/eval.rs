@@ -231,13 +231,160 @@ mod tests {
 
     fn evaluate(script: &str) -> serde_json::Value {
         let script = script.to_owned();
+        on_python_thread(move || evaluate_on_current_thread(&script))
+    }
+
+    fn on_python_thread<R: Send + 'static>(f: impl FnOnce() -> R + Send + 'static) -> R {
         std::thread::Builder::new()
             .name("rustpython-test".to_owned())
             .stack_size(32 * 1024 * 1024)
-            .spawn(move || evaluate_on_current_thread(&script))
+            .spawn(f)
             .expect("spawn RustPython test thread")
             .join()
             .expect("RustPython test thread")
+    }
+
+    fn native(script: &str, entropy: Vec<u8>) -> (serde_json::Value, usize) {
+        use dekopon_provider_sdk_testkit::Native;
+        crate::entropy::READS.with(|r| r.set(0));
+        let output = Native::<crate::PythonProvider>::new()
+            .entropy(entropy)
+            .clock(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000))
+            .call("python.eval", &json!({"script": script}).to_string());
+        assert_eq!(output.status, 0, "{}", output.stderr);
+        let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(value["ok"], true, "{value}");
+        (
+            value["result"].clone(),
+            crate::entropy::READS.with(|r| r.get()),
+        )
+    }
+
+    #[test]
+    fn random_install_import_command_and_describe_read_no_entropy() {
+        on_python_thread(|| {
+            let (_, reads) = native("import random", vec![]);
+            assert_eq!(reads, 0);
+            let (_, reads) = native("", vec![]);
+            assert_eq!(reads, 0);
+            dekopon_provider_sdk::provider::manifest::<crate::PythonProvider>().unwrap();
+            let proposed = dekopon_provider_sdk::provider::command::<crate::PythonProvider>(
+                &["-c".into(), "import random".into()],
+                false,
+            );
+            assert!(matches!(
+                proposed,
+                dekopon_provider_sdk::CommandRunOutcome::Proposed { .. }
+            ));
+            assert_eq!(crate::entropy::READS.with(|r| r.get()), 0);
+        });
+    }
+
+    #[test]
+    fn random_is_lazy_and_integer_seeds_repeat_without_entropy() {
+        on_python_thread(|| {
+            let script = "import random\nresult=[str(random.getrandbits(64)), random.random(), random.randrange(100)]";
+            let (first, reads) = native(script, vec![1; 32]);
+            assert_eq!(reads, 1);
+            let (second, reads) = native(script, vec![2; 32]);
+            assert_eq!(reads, 1);
+            assert_ne!(first, second);
+            let script = "import random\nrandom.seed(7)\nresult=[str(random.getrandbits(64)), random.random()]";
+            let (first, reads) = native(script, vec![]);
+            assert_eq!(reads, 0);
+            let (second, reads) = native(script, vec![]);
+            assert_eq!(reads, 0);
+            assert_eq!(first, second);
+        });
+    }
+
+    #[test]
+    fn secrets_system_random_and_urandom_each_read_the_broker() {
+        on_python_thread(|| {
+            let (result, reads) = native(
+                "import secrets, random\nresult=[secrets.token_bytes(16).hex(), secrets.token_bytes(16).hex(), random._urandom(3).hex(), random.SystemRandom().random()]",
+                (0..42).collect(),
+            );
+            assert_eq!(reads, 4);
+            assert_ne!(result[0], result[1]);
+            assert_eq!(result[2], "202122");
+            assert!(result[3].as_f64().is_some_and(|n| n > 0.0 && n < 1.0));
+        });
+    }
+
+    #[test]
+    fn new_modules_expose_no_os_sys_or_hash_attributes_and_refuse_byte_seeds() {
+        let result = evaluate(
+            "import random, secrets, datetime, statistics\nresult=[hasattr(random, '_os'), hasattr(random, '_sha512'), hasattr(secrets, 'compare_digest'), hasattr(statistics, 'sys'), hasattr(datetime.datetime.now.__func__, '__globals__') and 'sys' in datetime.datetime.now.__func__.__globals__]",
+        );
+        assert_eq!(
+            result["result"],
+            json!([false, false, false, false, false]),
+            "{result}"
+        );
+        for seed in ["'text'", "b'bytes'", "bytearray(b'bytes')"] {
+            let output = evaluate(&format!("import random\nrandom.seed({seed})"));
+            assert_eq!(output["error"]["type"], "TypeError", "{output}");
+            assert!(
+                output["error"]["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains("no hash primitives")
+            );
+        }
+    }
+
+    #[test]
+    fn entropy_and_datetime_fail_closed_outside_invocation() {
+        for script in [
+            "import random\nrandom.random()",
+            "import random\nrandom.seed(7)\nrandom.random()",
+            "import random\nrandom._random.Random().random()",
+            "import random\nrandom.SystemRandom().random()",
+            "import random\nrandom._urandom(1)",
+            "import secrets\nsecrets.token_bytes(16)",
+            "import datetime\ndatetime.datetime.now()",
+            "import datetime\ndatetime.date.today()",
+            "import time\ntime.localtime()",
+            "import time\ntime.strftime('%Y')",
+            "import time\ntime.time_ns()",
+        ] {
+            let output = evaluate(script);
+            assert_eq!(
+                output["error"]["type"], "RuntimeError",
+                "{script}: {output}"
+            );
+            assert!(
+                output["error"]["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains("unavailable outside invocation"),
+                "{output}"
+            );
+        }
+    }
+
+    #[test]
+    fn datetime_uses_invocation_utc_and_statistics_works() {
+        on_python_thread(|| {
+            let (result, reads) = native(
+                "import datetime as d, statistics as s, time\nn=d.datetime.now()\nresult=[n.isoformat(), str(d.date.today()), n.tzinfo is None, s.mean([1,2,3,4]), s.median([4,1,3,2]), time.strftime('%Y-%m-%d %H:%M:%S %Z', time.gmtime(0)), str(time.time_ns())]",
+                vec![],
+            );
+            assert_eq!(reads, 0);
+            assert_eq!(
+                result,
+                json!([
+                    "2023-11-14T22:13:20",
+                    "2023-11-14",
+                    true,
+                    2.5,
+                    2.5,
+                    "1970-01-01 00:00:00 UTC",
+                    "1700000000000000000"
+                ])
+            );
+        });
     }
 
     #[test]
@@ -308,8 +455,9 @@ result = {
         for script in [
             "import os",
             "import sys",
-            "import random",
-            "import secrets",
+            "import hashlib",
+            "import hmac",
+            "import ssl",
             "import socket",
             "import subprocess",
             "import ctypes",

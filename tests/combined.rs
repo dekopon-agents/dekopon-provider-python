@@ -67,7 +67,7 @@ result = {'sum':n.vector_add([1.,2.],[3.,4.]), 'dot':n.dot((1.,2.),(3.,4.)), 'pr
     for script in [
         "import os",
         "import sys",
-        "import datetime",
+        "import hashlib",
         "import socket",
         "import json.decoder",
         "import dekopon_tables as t\nresult=t.query('SELECT * FROM t; DROP TABLE t', {'t':[{'id':1}]})",

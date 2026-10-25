@@ -28,8 +28,8 @@ The component imports exactly `dekopon:stdio/streams@0.1.0`,
 `dekopon:spawn/run@0.1.0`, and `dekopon:storage/durable-files@0.1.1`.
 The broker must link all seven even for pure scripts,
 which succeed without HTTP or child-script grants.
-The public SDK Clock and Monotonic handles back Python's invocation-only `time.time()`
-and `time.monotonic()`; SQL's native entropy uses the SDK's invocation-scoped random handle. Bare empty-linker Wasmtime cannot instantiate the component.
+The SDK clocks back invocation-only `time` and UTC `datetime` readers. `random` and
+`secrets` read broker OS entropy; the VM hash seed stays fixed. `statistics` is available. Bare empty-linker Wasmtime cannot instantiate the component.
 
 Configure the broker's route/constraint set for `python.eval` with an explicit `http` grant:
 `allowedHosts` (exact authorities, including effective nondefault port), `allowedMethods` (`GET`
@@ -322,12 +322,17 @@ separately granted `python.sqlite-eval` persists bounded SQL in broker-owned `ma
 
 The exact component contract allows only Dekopon stdio, HTTP 1.1, wall and monotonic clocks,
 OS entropy, spawn 0.1, and `dekopon:storage/durable-files@0.1.1` (only for `python.sqlite-eval`). There is no WASI, JS/browser, host environment, filesystem, raw
-socket, arbitrary filesystem storage, OS subprocess, dynamic loading, or generic provider dispatch. Entropy is a broker import; the clocks back `time` only during invocation. Imports including `sys`, `os`, `random`, `secrets`, `socket`,
+socket, arbitrary filesystem storage, OS subprocess, dynamic loading, or generic provider dispatch. Entropy is a broker import; the clocks back `time` and UTC `datetime` only during invocation. Imports including `sys`, `os`, `hashlib`, `hmac`, `socket`,
 `ssl`, `subprocess`, `threading`, `ctypes`, `tkinter`, and `webbrowser` are denied.
 `open`, `input`, and `breakpoint` are absent; guest `compile`, `eval`, and `exec` are denied.
 
-The VM hash seed remains fixed. The getrandom backend uses broker OS entropy only during an
-authorized invocation, fails closed outside it, and is not exposed to Python. Determinism does not make adversarial scripts safe: host fuel,
+`random` and `secrets` read broker OS entropy; the VM hash seed stays fixed.
+`random` seeds lazily on first use; integer seeds are reproducible, while string and byte seeds
+are refused because no hash primitive is exposed. `secrets.compare_digest` is unavailable.
+`datetime.now()` returns naive UTC by default; no timezone database is included. `statistics`
+is available. Entropy and current-time readers fail closed outside an invocation.
+No hashlib, hmac or ssl: do cryptography with credentials in a provider, not a script.
+Anything a script prints reaches the model and the trace. Determinism does not make adversarial scripts safe: host fuel,
 deadline, memory, admission, and container limits are mandatory.
 
 ## Limits and operations

@@ -5,7 +5,7 @@ use dekopon_provider_sdk::provider::{Proposal, Usage};
 
 #[cfg(feature = "http")]
 const AFTER_HELP: &str = "Proposes python.eval; python sql proposes python.sqlite-eval with sqlite3.connect() (pathless). Pure scripts need no HTTP grant.
-Imports json, re, yaml, time (wall/monotonic), math, collections,
+Imports random, secrets, datetime (UTC), statistics, json, re, yaml, time (wall/monotonic), math, collections,
 itertools, functools, decimal, fractions, csv, io (memory only), base64,
 dekopon_numeric,
 dekopon_requests (GET/HEAD only), and dekopon_subshell.
@@ -20,9 +20,11 @@ a child panic returns status 70, and nonzero status is returned, not raised.
 No input= bytes or OS subprocess is available.
 Script: at most 65,536 UTF-8 bytes. print() is bounded to 65,536 bytes.
 Assign a safe JSON-shaped value to result. Runtime output is bounded JSON with
-ok/stdout/stdoutTruncated/result (or error), not an OS exit status.";
+ok/stdout/stdoutTruncated/result (or error), not an OS exit status.
+`random` and `secrets` draw from the broker's OS entropy. No hashlib, hmac or ssl: do cryptography with credentials in a provider, not a script. Anything a script prints reaches the model and the trace.";
 #[cfg(not(feature = "http"))]
-const AFTER_HELP: &str = "Proposes python.eval; python sql proposes python.sqlite-eval with sqlite3.connect() (pathless). Imports json, re, yaml, time (wall/monotonic), math, collections, itertools, functools, decimal, fractions, csv, io (memory only), base64, and dekopon_numeric; no filesystem or network authority.";
+const AFTER_HELP: &str = "Proposes python.eval; python sql proposes python.sqlite-eval with sqlite3.connect() (pathless). Imports random, secrets, datetime (UTC), statistics, json, re, yaml, time (wall/monotonic), math, collections, itertools, functools, decimal, fractions, csv, io (memory only), base64, and dekopon_numeric; no filesystem or network authority.
+`random` and `secrets` draw from the broker's OS entropy. No hashlib, hmac or ssl: do cryptography with credentials in a provider, not a script. Anything a script prints reaches the model and the trace.";
 
 #[cfg(feature = "tables")]
 const TABLES_HELP: &str = "dekopon_tables is available for bounded in-memory SQL.";
@@ -30,18 +32,17 @@ const TABLES_HELP: &str = "dekopon_tables is available for bounded in-memory SQL
 const TABLES_HELP: &str = "dekopon_tables is not built into this component.";
 
 #[cfg(all(feature = "http", feature = "tables"))]
-pub(crate) const CAPABILITY_DESCRIPTION: &str = "Evaluate bounded Python with in-memory dekopon_tables SQL, dekopon_numeric, invocation time, broker-granted dekopon_requests GET/HEAD and dekopon_subshell child scripts; assign output to result";
+pub(crate) const CAPABILITY_DESCRIPTION: &str = "Evaluate bounded Python with in-memory dekopon_tables SQL, dekopon_numeric, invocation time, UTC datetime, statistics, broker-entropy random and secrets, broker-granted dekopon_requests GET/HEAD and dekopon_subshell child scripts; assign output to result";
 #[cfg(all(feature = "http", not(feature = "tables")))]
-pub(crate) const CAPABILITY_DESCRIPTION: &str = "Evaluate bounded Python with dekopon_numeric, invocation time, broker-granted dekopon_requests GET/HEAD and dekopon_subshell child scripts; assign output to result";
+pub(crate) const CAPABILITY_DESCRIPTION: &str = "Evaluate bounded Python with dekopon_numeric, invocation time, UTC datetime, statistics, broker-entropy random and secrets, broker-granted dekopon_requests GET/HEAD and dekopon_subshell child scripts; assign output to result";
 #[cfg(all(not(feature = "http"), feature = "tables"))]
-pub(crate) const CAPABILITY_DESCRIPTION: &str = "Evaluate bounded Python with in-memory dekopon_tables SQL, dekopon_numeric and invocation time; assign output to result";
+pub(crate) const CAPABILITY_DESCRIPTION: &str = "Evaluate bounded Python with in-memory dekopon_tables SQL, dekopon_numeric and invocation time, UTC datetime, statistics, broker-entropy random and secrets; assign output to result";
 #[cfg(all(not(feature = "http"), not(feature = "tables")))]
-pub(crate) const CAPABILITY_DESCRIPTION: &str =
-    "Evaluate bounded Python with dekopon_numeric and invocation time; assign output to result";
+pub(crate) const CAPABILITY_DESCRIPTION: &str = "Evaluate bounded Python with dekopon_numeric and invocation time, UTC datetime, statistics, broker-entropy random and secrets; assign output to result";
 
 #[cfg(not(feature = "http"))]
 pub(crate) const ABOUT: &str =
-    "Run one Python 3 script in a fresh, import-free RustPython 0.5.0 VM";
+    "Run one Python 3 script in a fresh, constrained RustPython 0.5.0 VM";
 #[cfg(feature = "http")]
 pub(crate) const ABOUT: &str =
     "Run one Python 3 script with broker-granted HTTP in a fresh RustPython 0.5.0 VM";
@@ -210,7 +211,7 @@ mod tests {
             stdout.starts_with(
                 "Run one Python 3 script with broker-granted HTTP in a fresh RustPython 0.5.0 VM"
             ) || stdout
-                .starts_with("Run one Python 3 script in a fresh, import-free RustPython 0.5.0 VM"),
+                .starts_with("Run one Python 3 script in a fresh, constrained RustPython 0.5.0 VM"),
             "{stdout}"
         );
         let CommandRunOutcome::Rendered {
@@ -253,8 +254,15 @@ mod tests {
         ] {
             assert!(stdout.contains(phrase), "{phrase}");
         }
+        assert!(stdout.contains("`random` and `secrets` draw from the broker's OS entropy. No hashlib, hmac or ssl: do cryptography with credentials in a provider, not a script. Anything a script prints reaches the model and the trace."));
+        for module in ["random", "secrets", "datetime", "statistics"] {
+            assert!(stdout.contains(module));
+        }
         let description = <crate::Eval as provider::Capability>::DESCRIPTION;
-        for phrase in ["dekopon_numeric", "invocation time"] {
+        for phrase in [
+            "dekopon_numeric",
+            "invocation time, UTC datetime, statistics, broker-entropy random and secrets",
+        ] {
             assert!(description.contains(phrase), "{phrase}: {description}");
         }
         assert_eq!(

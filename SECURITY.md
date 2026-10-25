@@ -49,9 +49,9 @@ Python import hook:
   `dekopon:spawn/run@0.1.0`, and `dekopon:storage/durable-files@0.1.1`;
 - there is no WASI adapter, JavaScript/browser binding, environment, filesystem, raw socket,
   OS-subprocess, dynamic-library, or generic provider-dispatch import; the clocks and
-  entropy are available through broker handles; only the bounded invocation clock facade is Python-visible;
+  entropy are available through broker handles; bounded invocation clock and broker entropy facades are Python-visible;
 - `allow_external_library` is false. `python.eval` exposes exactly `json`, `re`, `yaml`,
-  `time`, `math`, `collections`, `itertools`, `functools`, `decimal`, `fractions`, `csv`,
+  `time`, `random`, `secrets`, UTC `datetime`, `statistics`, `math`, `collections`, `itertools`, `functools`, `decimal`, `fractions`, `csv`,
   in-memory `io`, `base64`, and `dekopon_numeric`; `dekopon_requests` and
   `dekopon_subshell` require the `http` build feature, while `dekopon_tables` requires
   the optional `tables` feature. Separately granted `python.sqlite-eval` adds `sqlite3`
@@ -61,7 +61,7 @@ Python import hook:
   modules are preloaded; no original privileged callable is retained on a Python-reachable object;
 - the Python-visible module registry is replaced with the built public modules, and denied
   transitive module references are removed from loaded module namespaces;
-- `sys`, `os`, `pathlib`, `random`, `secrets`, `socket`, `ssl`, `subprocess` (`sqlite3` remains denied under `python.eval`),
+- `sys`, `os`, `pathlib`, `hashlib`, `hmac`, `socket`, `ssl`, `subprocess` (`sqlite3` remains denied under `python.eval`),
   `threading`, `ctypes`, `tkinter`, and `webbrowser` are denied;
 - the `python` command word's `run-command` export only parses argv. It renders help and usage
   errors, or returns a `python.eval` proposal (or `python.sqlite-eval` for `python sql`)
@@ -109,7 +109,13 @@ strings. The dumper first applies the same safe-value walk and can construct no 
 
 The custom `getrandom 0.3.4` backend reaches the broker's OS entropy through an invocation-scoped
 SDK `Random` handle; without an installed handle it fails rather than falling back. The VM hash
-seed remains explicitly fixed and independent. No Python entropy surface is exposed. Host fuel
+seed remains explicitly fixed and independent. `random` and `secrets` read broker OS entropy; the VM hash seed stays fixed.
+`random` is seeded lazily, never during VM setup, command resolution, or describe.
+Explicit integer seeds are reproducible; string and byte seeds are refused without a hash primitive.
+`secrets.compare_digest` is absent. No hashlib, hmac or ssl: do cryptography with credentials
+in a provider, not a script. Anything a script prints reaches the model and the trace.
+UTC `datetime` current-time readers use the invocation clock and fail closed outside it;
+`datetime.now()` defaults to naive UTC. No timezone database or Python `os` is provided. Host fuel
 and deadlines, rather than hash randomization, bound adversarial algorithms.
 
 The vendored `rustpython-vm 0.5.0` build-script patch writes an empty `_sysconfigdata` table
