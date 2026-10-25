@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Broker-backed `random` and `secrets`, invocation-clock `datetime`, and `statistics` for Python scripts.
+
 ## [0.9.0] - 2026-10-16
 
 ### Added

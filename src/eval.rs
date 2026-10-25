@@ -104,6 +104,8 @@ fn interpreter_with_sql(sql: bool) -> Interpreter {
         crate::policy::policy_module::module_def(&builder.ctx),
         crate::numeric::numeric_module::module_def(&builder.ctx),
         crate::time::time_module::module_def(&builder.ctx),
+        crate::entropy::entropy_module::module_def(&builder.ctx),
+        crate::random::module_def(&builder.ctx),
         crate::yaml::yaml_module::module_def(&builder.ctx),
     ]);
     if sql {
@@ -118,7 +120,15 @@ fn interpreter_with_sql(sql: bool) -> Interpreter {
     ]);
     builder
         .add_native_modules(&definitions)
+        .init_hook(|vm| {
+            // Resolve time through our frozen UTC facade, never the ambient native module.
+            rustpython_common::rc::PyRc::get_mut(&mut vm.state)
+                .expect("exclusive VM initialization")
+                .module_defs
+                .remove("time");
+        })
         .add_frozen_modules(rustpython_pylib::FROZEN_STDLIB)
+        .add_frozen_modules(include!(concat!(env!("OUT_DIR"), "/invocation_frozen.rs")))
         .build()
 }
 
