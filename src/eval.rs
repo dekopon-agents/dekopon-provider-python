@@ -323,14 +323,26 @@ mod tests {
     #[test]
     fn secrets_system_random_and_urandom_each_read_the_broker() {
         on_python_thread(|| {
-            let (result, reads) = native(
-                "import secrets, random\nresult=[secrets.token_bytes(16).hex(), secrets.token_bytes(16).hex(), random._urandom(3).hex(), random.SystemRandom().random()]",
-                (0..42).collect(),
+            let (tokens, reads) = native(
+                "import secrets\nresult=[secrets.token_bytes(16).hex() for _ in range(3)]",
+                (0..48).collect(),
             );
-            assert_eq!(reads, 4);
-            assert_ne!(result[0], result[1]);
-            assert_eq!(result[2], "202122");
-            assert!(result[3].as_f64().is_some_and(|n| n > 0.0 && n < 1.0));
+            assert_eq!(reads, 3);
+            assert_eq!(
+                tokens,
+                json!([
+                    "000102030405060708090a0b0c0d0e0f",
+                    "101112131415161718191a1b1c1d1e1f",
+                    "202122232425262728292a2b2c2d2e2f",
+                ])
+            );
+            let (result, reads) = native(
+                "import random\nresult=[random._urandom(3).hex(), random.SystemRandom().random()]",
+                (0..10).collect(),
+            );
+            assert_eq!(reads, 2);
+            assert_eq!(result[0], "000102");
+            assert!(result[1].as_f64().is_some_and(|n| n > 0.0 && n < 1.0));
         });
     }
 
