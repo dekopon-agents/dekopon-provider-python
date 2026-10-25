@@ -295,7 +295,29 @@ mod tests {
             let (second, reads) = native(script, vec![]);
             assert_eq!(reads, 0);
             assert_eq!(first, second);
+            let (_, reads) = native(
+                "import statistics as s\nresult=s.NormalDist().samples(3)",
+                vec![3; 32],
+            );
+            assert_eq!(reads, 1);
         });
+    }
+
+    #[test]
+    fn explicit_datetime_conversions_do_not_need_an_invocation_clock() {
+        let output = evaluate(
+            "import datetime as d, time\nresult=[d.datetime.fromtimestamp(0).isoformat(), d.datetime.utcfromtimestamp(0).isoformat(), str(d.date.fromtimestamp(0)), time.strftime('%Y', time.gmtime(0))]",
+        );
+        assert_eq!(
+            output["result"],
+            json!([
+                "1970-01-01T00:00:00",
+                "1970-01-01T00:00:00",
+                "1970-01-01",
+                "1970"
+            ]),
+            "{output}"
+        );
     }
 
     #[test]
@@ -338,6 +360,7 @@ mod tests {
     fn entropy_and_datetime_fail_closed_outside_invocation() {
         for script in [
             "import random\nrandom.random()",
+            "import random\nrandom.getrandbits(0)",
             "import random\nrandom.seed(7)\nrandom.random()",
             "import random\nrandom._random.Random().random()",
             "import random\nrandom.SystemRandom().random()",
@@ -345,6 +368,9 @@ mod tests {
             "import secrets\nsecrets.token_bytes(16)",
             "import datetime\ndatetime.datetime.now()",
             "import datetime\ndatetime.date.today()",
+            "import datetime\ndatetime.datetime.today()",
+            "import datetime\ndatetime.datetime.utcnow()",
+            "import time\ntime.gmtime()",
             "import time\ntime.localtime()",
             "import time\ntime.strftime('%Y')",
         ] {

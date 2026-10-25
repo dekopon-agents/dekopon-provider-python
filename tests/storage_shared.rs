@@ -658,3 +658,75 @@ async fn built_python_and_turso_cross_read_persisted_rows_both_directions() {
         assert_eq!(p["ok"], false, "{script}: {p}");
     }
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn sqlite_eval_supports_broker_entropy_utc_datetime_and_statistics() {
+    let root = tempfile::tempdir().unwrap();
+    let host = StorageHost::open(
+        root.path().canonicalize().unwrap().join("storage"),
+        StorageLimits::default(),
+    )
+    .unwrap();
+    let registry = BrokerProviderRegistry::load_with_storage(
+        [path("DEKOPON_PROVIDER_COMPONENT")],
+        BrokerHostLimits::default(),
+        Some(host.clone()),
+    )
+    .await
+    .unwrap();
+    let script = "import random, secrets, datetime as d, statistics as s\nresult=[str(random.getrandbits(64)), secrets.token_bytes(16).hex(), d.datetime.now(d.UTC).timestamp(), s.mean([1,2,3,4]), s.median([4,1,3,2])]";
+    let before = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs_f64();
+    let first = call(
+        &registry,
+        &host,
+        "python",
+        "python.sqlite-eval",
+        json!({"script": script}),
+    )
+    .await
+    .unwrap();
+    let second = call(
+        &registry,
+        &host,
+        "python",
+        "python.sqlite-eval",
+        json!({"script": script}),
+    )
+    .await
+    .unwrap();
+    let after = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs_f64();
+    assert_eq!(first["ok"], true, "{first}");
+    assert_eq!(second["ok"], true, "{second}");
+    assert_ne!(first["result"][0], second["result"][0]);
+    assert_ne!(first["result"][1], second["result"][1]);
+    for result in [&first["result"], &second["result"]] {
+        assert!(
+            (before..=after).contains(&result[2].as_f64().unwrap()),
+            "{result}"
+        );
+        assert_eq!(result[3], 2.5);
+        assert_eq!(result[4], 2.5);
+    }
+    let seeded = json!({"script": "import random\nrandom.seed(7)\nresult=[str(random.getrandbits(64)),random.random()]"});
+    let first = call(
+        &registry,
+        &host,
+        "python",
+        "python.sqlite-eval",
+        seeded.clone(),
+    )
+    .await
+    .unwrap();
+    let second = call(&registry, &host, "python", "python.sqlite-eval", seeded)
+        .await
+        .unwrap();
+    assert_eq!(first["ok"], true, "{first}");
+    assert_eq!(second["ok"], true, "{second}");
+    assert_eq!(first["result"], second["result"]);
+}

@@ -13,7 +13,7 @@ mod _random {
     use rustpython_common::lock::PyMutex;
     use rustpython_vm::types::DefaultConstructor;
     use rustpython_vm::{
-        PyObjectRef, PyPayload, PyRef, PyResult, VirtualMachine,
+        AsObject, PyObjectRef, PyPayload, PyRef, PyResult, VirtualMachine,
         builtins::{PyInt, PyTupleRef},
         function::OptionalOption,
         pyclass,
@@ -53,8 +53,10 @@ mod _random {
                 crate::entropy::draw(&mut bytes)
                     .map_err(|()| vm.new_runtime_error("entropy unavailable outside invocation"))?;
                 let key: Vec<_> = bytes
-                    .chunks_exact(4)
-                    .map(|b| u32::from_le_bytes(b.try_into().unwrap()))
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .map(|b| u32::from_le_bytes(*b))
                     .collect();
                 *rng = Some(MT19937::new_with_slice_seed(&key));
             }
@@ -70,10 +72,17 @@ mod _random {
         fn seed(&self, n: OptionalOption<PyObjectRef>, vm: &VirtualMachine) -> PyResult<()> {
             *self.rng.lock() = match n.flatten() {
                 Some(n) => {
-                    // Fallback to using hash if object isn't Int-like.
+                    // Preserve numeric seeding without retaining any hash implementation.
                     let (_, mut key) = match n.downcast::<PyInt>() {
                         Ok(n) => n.as_bigint().abs(),
-                        Err(obj) => BigInt::from(obj.hash(vm)?).abs(),
+                        Err(obj) if obj.class().is(vm.ctx.types.float_type) => {
+                            BigInt::from(obj.hash(vm)?).abs()
+                        }
+                        Err(_) => {
+                            return Err(vm.new_type_error(
+                                "seed must be None, int, or float; no hash primitives",
+                            ));
+                        }
                     }
                     .to_u32_digits();
                     if cfg!(target_endian = "big") {
@@ -89,6 +98,9 @@ mod _random {
 
         #[pymethod]
         fn getrandbits(&self, k: PyObjectRef, vm: &VirtualMachine) -> PyResult<BigInt> {
+            if !crate::entropy::active() {
+                return Err(vm.new_runtime_error("entropy unavailable outside invocation"));
+            }
             let k_int = k.try_index(vm)?;
             let k_bigint = k_int.as_bigint();
             if k_bigint.is_negative() {

@@ -230,7 +230,7 @@ result = [math.sqrt(4), collections.deque([1,2]).pop(),
                 assert_eq!(output["error"]["type"], kind, "{script}: {output}");
                 assert_eq!(output["error"]["message"], message, "{script}: {output}");
             }
-            for script in ["import datetime", "import statistics"] {
+            for script in ["import hashlib", "import hmac", "import ssl"] {
                 let output = eval(script);
                 assert_eq!(output["error"]["type"], "ImportError", "{script}: {output}");
             }
