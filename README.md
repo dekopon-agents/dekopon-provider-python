@@ -329,7 +329,7 @@ socket, arbitrary filesystem storage, OS subprocess, dynamic loading, or generic
 `random` and `secrets` read broker OS entropy; the VM hash seed stays fixed.
 `random` seeds lazily on first use; integer seeds are reproducible, while string and byte seeds
 are refused because no hash primitive is exposed. `secrets.compare_digest` is unavailable.
-`datetime.now()` returns naive UTC by default; no timezone database is included. `statistics`
+`datetime.now()` returns naive UTC by default and adds no timezone database. `statistics`
 is available. Entropy and current-time readers fail closed outside an invocation.
 No hashlib, hmac or ssl: do cryptography with credentials in a provider, not a script.
 Anything a script prints reaches the model and the trace. Determinism does not make adversarial scripts safe: host fuel,

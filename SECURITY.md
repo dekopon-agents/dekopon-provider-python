@@ -115,7 +115,7 @@ Explicit integer seeds are reproducible; string and byte seeds are refused witho
 `secrets.compare_digest` is absent. No hashlib, hmac or ssl: do cryptography with credentials
 in a provider, not a script. Anything a script prints reaches the model and the trace.
 UTC `datetime` current-time readers use the invocation clock and fail closed outside it;
-`datetime.now()` defaults to naive UTC. No timezone database or Python `os` is provided. Host fuel
+`datetime.now()` defaults to naive UTC and adds no timezone database. Python `os` stays denied. Host fuel
 and deadlines, rather than hash randomization, bound adversarial algorithms.
 
 The vendored `rustpython-vm 0.5.0` build-script patch writes an empty `_sysconfigdata` table
