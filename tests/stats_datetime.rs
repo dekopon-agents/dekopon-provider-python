@@ -59,12 +59,10 @@ for module in [random, secrets, datetime, statistics, time]:
     let inventory = json!({
         "public_names": names,
         "added_time_names": {
-            "altzone": "no clock read", "daylight": "no clock read",
             "gmtime": "clock read only when seconds is omitted or None",
             "localtime": "clock read only when seconds is omitted or None",
             "strftime": "clock read only when tuple is omitted or None",
-            "struct_time": "no clock read", "time_ns": "clock read",
-            "timezone": "no clock read", "tzname": "no clock read"
+            "struct_time": "no clock read"
         }
     });
     let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))

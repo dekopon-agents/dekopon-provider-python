@@ -42,8 +42,11 @@ fn main() {
 "#,
     );
     // No process/fork lifecycle exists in the component.
-    let start = random.find("if hasattr(_os, ").unwrap();
-    random.truncate(start);
+    replace(
+        &mut random,
+        "if hasattr(_os, \"fork\"):\n    _os.register_at_fork(after_in_child=_inst.seed)",
+        "",
+    );
     fs::write(frozen.join("random.py"), random).unwrap();
     let mut secrets = fs::read_to_string(lib.join("secrets.py")).unwrap();
     replace(&mut secrets, "from hmac import compare_digest", "");

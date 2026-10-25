@@ -200,6 +200,30 @@ pub(crate) fn install(vm: &VirtualMachine, sql: bool) -> PyResult<ClosedIntrospe
         .chain(sql.then_some("sqlite3"))
         .map(|name| vm.import(name, 0).map(|module| (name, module)))
         .collect::<PyResult<Vec<_>>>()?;
+    // Numeric ABCs otherwise traverse __subclasses__ on their first isinstance check.
+    // Resolve the supported scalar relationships while trusted introspection is available;
+    // never retain a callable that can restore or traverse the registry for a script.
+    let numbers = vm.import("numbers", 0)?;
+    let scalar_types = [
+        vm.ctx.types.int_type.as_object().to_owned(),
+        vm.ctx.types.bool_type.as_object().to_owned(),
+        vm.ctx.types.float_type.as_object().to_owned(),
+        vm.ctx.types.complex_type.as_object().to_owned(),
+        vm.import("decimal", 0)?.get_attr("Decimal", vm)?,
+        vm.import("fractions", 0)?.get_attr("Fraction", vm)?,
+    ];
+    let issubclass = vm.builtins.get_attr("issubclass", vm)?;
+    let mut numeric_abcs = ["Number", "Complex", "Real", "Rational", "Integral"]
+        .into_iter()
+        .map(|name| numbers.get_attr(name, vm))
+        .collect::<PyResult<Vec<_>>>()?;
+    numeric_abcs.push(scalar_types[5].clone()); // Fraction itself has ABCMeta.
+    for abc in numeric_abcs {
+        for scalar in &scalar_types {
+            issubclass.call((scalar.clone(), abc.clone()), vm)?;
+        }
+    }
+
     let policy = vm.import("_dekopon_policy", 0)?;
     let guarded_import = policy.get_attr("guarded_import", vm)?;
 

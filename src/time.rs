@@ -49,16 +49,6 @@ pub(crate) mod time_module {
         })
     }
     #[pyfunction]
-    fn time_ns(vm: &VirtualMachine) -> PyResult<u64> {
-        super::CLOCKS.with(|slot| {
-            slot.borrow()
-                .as_ref()
-                .map(|(clock, _)| clock.now_unix_millis() * 1_000_000)
-                .ok_or_else(|| vm.new_runtime_error("clock unavailable outside invocation"))
-        })
-    }
-
-    #[pyfunction]
     fn _gmtime(seconds: f64, vm: &VirtualMachine) -> PyResult<rustpython_vm::builtins::PyTupleRef> {
         use chrono::{DateTime, Datelike, Timelike};
         if !seconds.is_finite()
