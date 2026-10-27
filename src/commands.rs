@@ -5,8 +5,8 @@ use dekopon_provider_sdk::provider::{Proposal, Usage};
 
 #[cfg(feature = "http")]
 const AFTER_HELP: &str = "Proposes python.eval; python sql proposes python.sqlite-eval with sqlite3.connect() (pathless). Pure scripts need no HTTP grant.
-Imports random, secrets, datetime (UTC), statistics, json, re, yaml, time (wall/monotonic), math, collections,
-itertools, functools, decimal, fractions, csv, io (memory only), base64,
+Imports random, secrets, datetime (UTC; no strptime), statistics, json, re, yaml, time (wall/monotonic; UTC gmtime/localtime/strftime/struct_time),
+math, collections, itertools, functools, decimal, fractions, csv, io (memory only), base64,
 dekopon_numeric,
 dekopon_requests (GET/HEAD only), and dekopon_subshell.
 Every HTTP call is constrained by the host invocation grant; no credentials,
@@ -23,7 +23,7 @@ Assign a safe JSON-shaped value to result. Runtime output is bounded JSON with
 ok/stdout/stdoutTruncated/result (or error), not an OS exit status.
 `random` and `secrets` draw from the broker's OS entropy. No hashlib, hmac or ssl: do cryptography with credentials in a provider, not a script. Anything a script prints reaches the model and the trace.";
 #[cfg(not(feature = "http"))]
-const AFTER_HELP: &str = "Proposes python.eval; python sql proposes python.sqlite-eval with sqlite3.connect() (pathless). Imports random, secrets, datetime (UTC), statistics, json, re, yaml, time (wall/monotonic), math, collections, itertools, functools, decimal, fractions, csv, io (memory only), base64, and dekopon_numeric; no filesystem or network authority.
+const AFTER_HELP: &str = "Proposes python.eval; python sql proposes python.sqlite-eval with sqlite3.connect() (pathless). Imports random, secrets, datetime (UTC; no strptime), statistics, json, re, yaml, time (wall/monotonic; UTC gmtime/localtime/strftime/struct_time), math, collections, itertools, functools, decimal, fractions, csv, io (memory only), base64, and dekopon_numeric; no filesystem or network authority.
 `random` and `secrets` draw from the broker's OS entropy. No hashlib, hmac or ssl: do cryptography with credentials in a provider, not a script. Anything a script prints reaches the model and the trace.";
 
 #[cfg(feature = "tables")]
@@ -240,7 +240,7 @@ mod tests {
             "sql",
             "RustPython 0.5.0",
             "dekopon_numeric",
-            "time (wall/monotonic)",
+            "time (wall/monotonic; UTC gmtime/localtime/strftime/struct_time)",
             TABLES_HELP,
             "math",
             "collections",

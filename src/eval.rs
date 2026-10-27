@@ -346,6 +346,103 @@ mod tests {
         });
     }
 
+    const OVERSIZED_ENTROPY: &str = r#"import random, secrets
+errors = []
+for draw in [lambda: secrets.token_bytes(10**9), lambda: secrets.token_bytes(2**63-1),
+             lambda: random._urandom(2**31-1), lambda: random.getrandbits(2**31-1),
+             lambda: random.randbytes(2**31)]:
+    try:
+        draw()
+        errors.append(None)
+    except ValueError as error:
+        errors.append(str(error))
+result = [errors, secrets.token_bytes(4).hex(), random.getrandbits(8) < 256]
+"#;
+
+    #[test]
+    fn oversized_entropy_requests_raise_and_the_invocation_keeps_working() {
+        on_python_thread(|| {
+            let (result, reads) = native(OVERSIZED_ENTROPY, (0..64).collect());
+            let errors = result[0].as_array().unwrap();
+            assert_eq!(errors.len(), 5, "{result}");
+            for error in errors {
+                assert!(
+                    error.as_str().is_some_and(|e| e.contains("exceeds")),
+                    "{result}"
+                );
+            }
+            assert_eq!(result[1], "00010203");
+            assert_eq!(result[2], true);
+            assert_eq!(reads, 2);
+        });
+    }
+
+    #[test]
+    fn out_of_invocation_entropy_fails_closed_before_sizing_a_buffer() {
+        // Each length would abort the process if allocated; the refusal must come first.
+        for script in [
+            "import random\nrandom._urandom(2**62)",
+            "import secrets\nsecrets.token_bytes(2**63-1)",
+            "import random\nrandom.getrandbits(2**62)",
+        ] {
+            let output = evaluate(script);
+            assert_eq!(
+                output["error"]["type"], "RuntimeError",
+                "{script}: {output}"
+            );
+        }
+    }
+
+    #[test]
+    fn container_abc_checks_work_after_subclasses_is_closed() {
+        on_python_thread(|| {
+            let (result, _) = native(
+                "import random, statistics, collections\nresult=[random.sample([1,2,3], 1)[0] in (1,2,3), sorted(random.sample((1,2), 2)), statistics.mode([1,1,2]), statistics.multimode('aab'), statistics.mode('ééa'), statistics.mode(range(3)), statistics.mode({1: 0}), statistics.mode(x for x in [3]), dict(collections.Counter('aab')), dict(collections.Counter({'a': 1})), dict(collections.Counter(collections.Counter('a')))]",
+                vec![5; 32],
+            );
+            assert_eq!(
+                result,
+                json!([true, [1, 2], 1, ["a"], "\u{e9}", 0, 1, 3, {"a": 2, "b": 1}, {"a": 1}, {"a": 1}])
+            );
+            let (result, _) = native(
+                "import random\ntry:\n    random.sample({1, 2}, 1)\n    result = None\nexcept TypeError:\n    result = 'TypeError'",
+                vec![5; 32],
+            );
+            assert_eq!(result, "TypeError");
+        });
+        let output = evaluate(
+            "import collections, statistics\nresult=[hasattr(collections, 'namedtuple'), hasattr(statistics, 'namedtuple'), collections.Counter('abb').most_common(1)]",
+        );
+        assert_eq!(
+            output["result"],
+            json!([false, false, [["b", 2]]]),
+            "{output}"
+        );
+        // A script's own iterable, and a registration that invalidates every negative ABC cache.
+        let output = evaluate(
+            "import collections, statistics\nclass Bag:\n    def __iter__(self):\n        return iter([2, 2, 1])\ncollections.abc.Sequence.register(Bag)\nresult=[sorted(collections.Counter(Bag()).items()), statistics.mode([4, 4, 1.5]), isinstance(5, collections.abc.Iterable)]",
+        );
+        assert_eq!(
+            output["result"],
+            json!([[[1, 1], [2, 2]], 4, false]),
+            "{output}"
+        );
+    }
+
+    #[test]
+    fn strptime_is_unavailable_as_documented() {
+        for call in [
+            "datetime.strptime('2020', '%Y')",
+            "date.strptime('2020', '%Y')",
+            "time.strptime('1', '%H')",
+        ] {
+            let output = evaluate(&format!(
+                "from datetime import date, datetime, time\n{call}"
+            ));
+            assert_eq!(output["error"]["type"], "ImportError", "{call}: {output}");
+        }
+    }
+
     #[test]
     fn new_modules_expose_no_os_sys_or_hash_attributes_and_refuse_byte_seeds() {
         let result = evaluate(

@@ -88,13 +88,25 @@ thread_local! {
 
 #[rustpython_vm::pymodule(name = "_dekopon_entropy")]
 pub(crate) mod entropy_module {
+    use crate::limits::ENTROPY_BYTES;
     use rustpython_vm::{PyResult, VirtualMachine, builtins::PyBytesRef};
 
     #[pyfunction]
     fn draw(length: isize, vm: &VirtualMachine) -> PyResult<PyBytesRef> {
+        // Fail closed before sizing anything from the script.
+        if !super::active() {
+            return Err(vm.new_runtime_error("entropy unavailable outside invocation"));
+        }
         let length =
             usize::try_from(length).map_err(|_| vm.new_value_error("negative entropy length"))?;
-        let mut bytes = vec![0; length];
+        if length > ENTROPY_BYTES {
+            return Err(vm.new_value_error(format!("entropy length exceeds {ENTROPY_BYTES} bytes")));
+        }
+        let mut bytes = Vec::new();
+        bytes
+            .try_reserve_exact(length)
+            .map_err(|_| vm.new_memory_error("cannot allocate entropy buffer"))?;
+        bytes.resize(length, 0);
         super::draw(&mut bytes)
             .map_err(|()| vm.new_runtime_error("entropy unavailable outside invocation"))?;
         Ok(vm.ctx.new_bytes(bytes))

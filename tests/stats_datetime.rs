@@ -84,3 +84,41 @@ for module in [random, secrets, datetime, statistics, time]:
         "regenerate with UPDATE_PYTHON_INVENTORY=1 against the built component"
     );
 }
+
+#[test]
+fn component_survives_oversized_entropy_requests_and_keeps_drawing() {
+    let result = eval(
+        "python.eval",
+        r#"import random, secrets
+errors = []
+for draw in [lambda: secrets.token_bytes(10**9), lambda: random._urandom(2**31-1),
+             lambda: random.getrandbits(2**31-1), lambda: secrets.token_bytes(2**63-1)]:
+    try:
+        draw()
+        errors.append(None)
+    except (ValueError, OverflowError) as error:
+        errors.append(type(error).__name__)
+result = [errors, len(secrets.token_bytes(1048576)), len(secrets.token_bytes(16)),
+          random.getrandbits(8388608) >= 0]
+"#,
+    );
+    assert_eq!(
+        result,
+        json!([
+            // 2**63-1 already overflows the 32-bit Wasm isize argument.
+            ["ValueError", "ValueError", "ValueError", "OverflowError"],
+            1_048_576,
+            16,
+            true
+        ])
+    );
+}
+
+#[test]
+fn component_sequence_and_mapping_checks_work_for_scripts() {
+    let result = eval(
+        "python.eval",
+        "import random, statistics, collections\nresult=[random.sample([1,2,3], 1)[0] in (1,2,3), statistics.mode([1,1,2]), dict(collections.Counter('aab'))]",
+    );
+    assert_eq!(result, json!([true, 1, {"a": 2, "b": 1}]));
+}

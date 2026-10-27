@@ -18,4 +18,3 @@ localtime = gmtime
 
 def strftime(format, t=None):
     return _strftime(format, tuple(localtime() if t is None else t))
-

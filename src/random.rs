@@ -5,6 +5,7 @@ pub(crate) use _random::module_def;
 
 #[rustpython_vm::pymodule]
 mod _random {
+    use crate::limits::ENTROPY_BYTES;
     use itertools::Itertools;
     use malachite_bigint::{BigInt, BigUint, Sign};
     use mt19937::MT19937;
@@ -109,23 +110,31 @@ mod _random {
             let k: isize = k_int
                 .try_to_primitive(vm)
                 .map_err(|_| vm.new_overflow_error("getrandbits: number of bits too large"))?;
+            if k.unsigned_abs() > ENTROPY_BYTES * 8 {
+                return Err(vm.new_value_error(format!(
+                    "getrandbits: number of bits exceeds {}",
+                    ENTROPY_BYTES * 8
+                )));
+            }
             match k {
                 0 => Ok(BigInt::zero()),
                 mut k => {
+                    let words = (k - 1) as usize / 32 + 1;
+                    let mut word_array = Vec::new();
+                    word_array
+                        .try_reserve_exact(words)
+                        .map_err(|_| vm.new_memory_error("cannot allocate random bits"))?;
                     self.with_rng(vm, |rng| {
                         let mut gen_u32 = |k| {
                             let r = rng.next_u32();
                             if k < 32 { r >> (32 - k) } else { r }
                         };
 
-                        let words = (k - 1) / 32 + 1;
-                        let word_array = (0..words)
-                            .map(|_| {
-                                let word = gen_u32(k);
-                                k = k.wrapping_sub(32);
-                                word
-                            })
-                            .collect::<Vec<_>>();
+                        word_array.extend((0..words).map(|_| {
+                            let word = gen_u32(k);
+                            k = k.wrapping_sub(32);
+                            word
+                        }));
 
                         let uint = BigUint::new(word_array);
                         // very unlikely but might as well check

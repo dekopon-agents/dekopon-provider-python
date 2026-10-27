@@ -4,6 +4,9 @@ pub(crate) const YAML_BYTES: usize = 65_536;
 pub(crate) const RESULT_BYTES: usize = 131_072;
 pub(crate) const DIAGNOSTIC_BYTES: usize = 2_048;
 pub(crate) const RESPONSE_BYTES: usize = 786_432;
+/// Largest single broker-entropy draw (`_urandom`, `secrets.token_bytes`) or its
+/// `getrandbits` equivalent in bytes; a script cannot size an allocation beyond it.
+pub(crate) const ENTROPY_BYTES: usize = 1_048_576;
 pub(crate) const MAX_DEPTH: usize = 32;
 pub(crate) const MAX_NODES: usize = 10_000;
 pub(crate) const PYTHON_RECURSION: usize = 200;
