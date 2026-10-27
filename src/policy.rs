@@ -200,9 +200,9 @@ pub(crate) fn install(vm: &VirtualMachine, sql: bool) -> PyResult<ClosedIntrospe
         .chain(sql.then_some("sqlite3"))
         .map(|name| vm.import(name, 0).map(|module| (name, module)))
         .collect::<PyResult<Vec<_>>>()?;
-    // Numeric ABCs otherwise traverse __subclasses__ on their first isinstance check.
-    // Resolve the supported scalar relationships while trusted introspection is available;
-    // never retain a callable that can restore or traverse the registry for a script.
+    // Warm the numeric ABC caches for the supported scalars. Correctness no longer depends on
+    // this: the vendored _abc reads the native subclass list once type.__subclasses__ is gone.
+    // Never retain a callable that can restore or traverse the registry for a script.
     let numbers = vm.import("numbers", 0)?;
     let scalar_types = [
         vm.ctx.types.int_type.as_object().to_owned(),
