@@ -67,7 +67,7 @@ result = {'sum':n.vector_add([1.,2.],[3.,4.]), 'dot':n.dot((1.,2.),(3.,4.)), 'pr
     for script in [
         "import os",
         "import sys",
-        "import datetime",
+        "import hashlib",
         "import socket",
         "import json.decoder",
         "import dekopon_tables as t\nresult=t.query('SELECT * FROM t; DROP TABLE t', {'t':[{'id':1}]})",
@@ -230,7 +230,7 @@ result = [math.sqrt(4), collections.deque([1,2]).pop(),
                 assert_eq!(output["error"]["type"], kind, "{script}: {output}");
                 assert_eq!(output["error"]["message"], message, "{script}: {output}");
             }
-            for script in ["import datetime", "import statistics"] {
+            for script in ["import hashlib", "import hmac", "import ssl"] {
                 let output = eval(script);
                 assert_eq!(output["error"]["type"], "ImportError", "{script}: {output}");
             }

@@ -9,6 +9,10 @@ const ALLOWED_MODULES: &[&str] = &[
     "yaml",
     "time",
     "math",
+    "random",
+    "secrets",
+    "datetime",
+    "statistics",
     "collections",
     "itertools",
     "functools",
@@ -30,8 +34,8 @@ const DENIED_MODULES: [&str; 14] = [
     "sys",
     "os",
     "pathlib",
-    "random",
-    "secrets",
+    "hashlib",
+    "hmac",
     "socket",
     "ssl",
     "sqlite3",
@@ -196,6 +200,34 @@ pub(crate) fn install(vm: &VirtualMachine, sql: bool) -> PyResult<ClosedIntrospe
         .chain(sql.then_some("sqlite3"))
         .map(|name| vm.import(name, 0).map(|module| (name, module)))
         .collect::<PyResult<Vec<_>>>()?;
+    // Warm the numeric ABC caches for the supported scalars. Correctness no longer depends on
+    // this: the vendored _abc reads the native subclass list once type.__subclasses__ is gone.
+    // Never retain a callable that can restore or traverse the registry for a script.
+    let numbers = vm.import("numbers", 0)?;
+    let scalar_types = [
+        vm.ctx.types.int_type.as_object().to_owned(),
+        vm.ctx.types.bool_type.as_object().to_owned(),
+        vm.ctx.types.float_type.as_object().to_owned(),
+        vm.ctx.types.complex_type.as_object().to_owned(),
+        vm.import("decimal", 0)?.get_attr("Decimal", vm)?,
+        vm.import("fractions", 0)?.get_attr("Fraction", vm)?,
+    ];
+    let issubclass = vm.builtins.get_attr("issubclass", vm)?;
+    let mut numeric_abcs = ["Number", "Complex", "Real", "Rational", "Integral"]
+        .into_iter()
+        .map(|name| numbers.get_attr(name, vm))
+        .collect::<PyResult<Vec<_>>>()?;
+    numeric_abcs.push(scalar_types[5].clone()); // Fraction itself has ABCMeta.
+    for abc in numeric_abcs {
+        for scalar in &scalar_types {
+            issubclass.call((scalar.clone(), abc.clone()), vm)?;
+        }
+    }
+    // Counter.most_common(n) (behind statistics.mode) imports heapq lazily, which the guest guard
+    // refuses; bind the computation-only module now, as that lazy import would.
+    let collections = vm.import("collections", 0)?;
+    collections.set_attr("heapq", vm.import("heapq", 0)?, vm)?;
+
     let policy = vm.import("_dekopon_policy", 0)?;
     let guarded_import = policy.get_attr("guarded_import", vm)?;
 
@@ -210,6 +242,10 @@ pub(crate) fn install(vm: &VirtualMachine, sql: bool) -> PyResult<ClosedIntrospe
         .chain(REMOVED_BUILTINS)
         .filter_map(|name| vm.builtins.get_attr(name, vm).ok())
         .collect::<Vec<_>>();
+    // namedtuple calls guest eval after import, which the policy removes. Do not advertise a
+    // callable that fails with NameError or restore eval, under collections or any alias such as
+    // statistics.namedtuple; existing import-time tuples survive.
+    let namedtuple = collections.get_attr("namedtuple", vm)?;
     let denied_modules = DENIED_MODULES
         .iter()
         .filter_map(|name| modules.get_item(*name, vm).ok())
@@ -231,7 +267,8 @@ pub(crate) fn install(vm: &VirtualMachine, sql: bool) -> PyResult<ClosedIntrospe
         for (key, value) in namespace.items_vec() {
             let privileged = privileged_callables
                 .iter()
-                .any(|callable| value.is(callable));
+                .any(|callable| value.is(callable))
+                || value.is(&namedtuple);
             let denied_reference = denied_modules
                 .iter()
                 .any(|denied_module| value.is(denied_module));
@@ -239,15 +276,6 @@ pub(crate) fn install(vm: &VirtualMachine, sql: bool) -> PyResult<ClosedIntrospe
                 let _removed = namespace.del_item(key.as_object(), vm);
             }
         }
-    }
-
-    // namedtuple calls guest eval after import, which the policy removes. Do not advertise a
-    // callable that fails with NameError or restore eval; existing import-time tuples survive.
-    if let Some((_, collections)) = public_modules
-        .iter()
-        .find(|(name, _)| *name == "collections")
-    {
-        collections.del_attr("namedtuple", vm)?;
     }
 
     // enum is an implementation detail of re and was the shortest path to enum.sys.modules.
@@ -294,7 +322,7 @@ pub(crate) fn is_allowed_module(name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::is_allowed_module;
+    use super::{ALLOWED_MODULES, is_allowed_module};
 
     #[test]
     fn allowlist_is_exact_and_closed() {
@@ -304,6 +332,10 @@ mod tests {
             "yaml",
             "time",
             "math",
+            "random",
+            "secrets",
+            "datetime",
+            "statistics",
             "collections",
             "itertools",
             "functools",
@@ -322,12 +354,41 @@ mod tests {
             is_allowed_module("dekopon_tables"),
             cfg!(feature = "tables")
         );
+        let mut exact = vec![
+            "json",
+            "re",
+            "yaml",
+            "time",
+            "math",
+            "random",
+            "secrets",
+            "datetime",
+            "statistics",
+            "collections",
+            "itertools",
+            "functools",
+            "decimal",
+            "fractions",
+            "csv",
+            "io",
+            "base64",
+            "dekopon_numeric",
+        ];
+        if cfg!(feature = "tables") {
+            exact.push("dekopon_tables");
+        }
+        if cfg!(feature = "http") {
+            exact.extend(["dekopon_requests", "dekopon_subshell"]);
+        }
+        assert_eq!(ALLOWED_MODULES, exact);
         for denied in [
             "re._parser",
             "json.decoder",
             "sys",
             "os",
-            "random",
+            "hashlib",
+            "hmac",
+            "ssl",
             "socket",
             "subprocess",
             "ctypes",

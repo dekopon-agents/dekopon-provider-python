@@ -27,7 +27,7 @@ new grants. With `INHERIT`, the child takes the rest of parent stdin (which may 
 ahead); do not read parent stdin after it returns. Non-empty child stdout ends in a
 newline, stderr is empty in core 0.33.0, and a child panic returns status 70. The clocks are
 read through SDK handles only during invocation; metadata never reads a clock. The custom getrandom
-backend holds the random handle only while `python.eval` runs and has no fallback source. The
+backend holds the random handle only while `python.eval` or `python.sqlite-eval` runs and has no fallback source. The
 RustPython hash seed remains fixed independently.
 
 | Historical v0.8.0 combined shared-build artifact (before default-off SQL) | Value |

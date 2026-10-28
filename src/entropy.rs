@@ -21,11 +21,16 @@ impl Drop for EntropyScope {
     }
 }
 
-#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
-fn fill_random(destination: &mut [u8]) -> Result<(), ()> {
+pub(crate) fn active() -> bool {
+    CURRENT.with(|current| current.borrow().is_some())
+}
+
+pub(crate) fn draw(destination: &mut [u8]) -> Result<(), ()> {
     CURRENT.with(|current| {
         let borrowed = current.borrow();
         let random = borrowed.as_ref().ok_or(())?;
+        #[cfg(test)]
+        READS.with(|reads| reads.set(reads.get() + 1));
         random.fill(destination);
         Ok(())
     })
@@ -33,7 +38,7 @@ fn fill_random(destination: &mut [u8]) -> Result<(), ()> {
 
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 fn fill_random02(destination: &mut [u8]) -> Result<(), getrandom02::Error> {
-    fill_random(destination).map_err(|()| getrandom02::Error::UNSUPPORTED)
+    draw(destination).map_err(|()| getrandom02::Error::UNSUPPORTED)
 }
 
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
@@ -49,7 +54,7 @@ unsafe extern "Rust" fn __getrandom_v03_custom(
         return Err(getrandom::Error::UNEXPECTED);
     }
     let mut bytes = vec![0; length];
-    fill_random(&mut bytes).map_err(|()| getrandom::Error::UNEXPECTED)?;
+    draw(&mut bytes).map_err(|()| getrandom::Error::UNEXPECTED)?;
     if length != 0 {
         // SAFETY: getrandom supplies a writable region of `length` bytes; the initialized
         // temporary owns precisely that many bytes and a null pointer is used only for zero.
@@ -68,10 +73,42 @@ unsafe extern "Rust" fn __getrandom_v04_custom(
         return Err(getrandom04::Error::UNEXPECTED);
     }
     let mut bytes = vec![0; length];
-    fill_random(&mut bytes).map_err(|()| getrandom04::Error::UNEXPECTED)?;
+    draw(&mut bytes).map_err(|()| getrandom04::Error::UNEXPECTED)?;
     if length != 0 {
         // SAFETY: getrandom supplies a writable region of length bytes.
         unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), destination, length) };
     }
     Ok(())
+}
+
+#[cfg(test)]
+thread_local! {
+    pub(crate) static READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[rustpython_vm::pymodule(name = "_dekopon_entropy")]
+pub(crate) mod entropy_module {
+    use crate::limits::ENTROPY_BYTES;
+    use rustpython_vm::{PyResult, VirtualMachine, builtins::PyBytesRef};
+
+    #[pyfunction]
+    fn draw(length: isize, vm: &VirtualMachine) -> PyResult<PyBytesRef> {
+        // Fail closed before sizing anything from the script.
+        if !super::active() {
+            return Err(vm.new_runtime_error("entropy unavailable outside invocation"));
+        }
+        let length =
+            usize::try_from(length).map_err(|_| vm.new_value_error("negative entropy length"))?;
+        if length > ENTROPY_BYTES {
+            return Err(vm.new_value_error(format!("entropy length exceeds {ENTROPY_BYTES} bytes")));
+        }
+        let mut bytes = Vec::new();
+        bytes
+            .try_reserve_exact(length)
+            .map_err(|_| vm.new_memory_error("cannot allocate entropy buffer"))?;
+        bytes.resize(length, 0);
+        super::draw(&mut bytes)
+            .map_err(|()| vm.new_runtime_error("entropy unavailable outside invocation"))?;
+        Ok(vm.ctx.new_bytes(bytes))
+    }
 }

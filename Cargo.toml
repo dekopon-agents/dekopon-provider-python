@@ -18,7 +18,15 @@ default = ["http"]
 http = []
 tables = ["dep:datafusion", "dep:tokio"]
 
+[build-dependencies]
+rustpython-pylib = { version = "=0.5.0", default-features = false }
+
 [dependencies]
+itertools = "=0.14.0"
+malachite-bigint = "=0.9.2"
+mt19937 = "=3.2.0"
+rand_core = "=0.9.5"
+chrono = { version = "=0.4.45", default-features = false, features = ["std"] }
 clap = { version = "=4.6.6", features = ["derive"] }
 dekopon-provider-sdk = "=0.33.0"
 dekopon-turso-sql-io = { git = "https://github.com/dekopon-agents/dekopon-provider-turso-sql", rev = "fd7b092f32fd2e6b65811a380f5edc28b06be451", default-features = false }

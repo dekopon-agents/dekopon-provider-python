@@ -7,6 +7,7 @@ mod exception;
 mod limits;
 mod numeric;
 mod policy;
+mod random;
 #[cfg(feature = "http")]
 mod requests;
 mod sqlite;

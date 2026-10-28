@@ -9,7 +9,7 @@ pub(crate) use _abc::module_def;
 mod _abc {
     use crate::{
         AsObject, PyObject, PyObjectRef, PyPayload, PyRef, PyResult, VirtualMachine,
-        builtins::{PyFrozenSet, PyList, PySet, PyStr, PyTupleRef, PyTypeRef, PyWeak},
+        builtins::{PyFrozenSet, PySet, PyStr, PyTupleRef, PyTypeRef, PyWeak},
         common::lock::PyRwLock,
         convert::ToPyObject,
         protocol::PyIterReturn,
@@ -387,12 +387,15 @@ mod _abc {
         }
 
         // 6. Check if it's a subclass of a subclass (recursive)
-        let subclasses: PyRef<PyList> = vm
-            .call_method(&cls, "__subclasses__", ())?
-            .downcast()
-            .map_err(|_| vm.new_type_error("__subclasses__() must return a list"))?;
+        // Dekopon: read the native list; the sandbox removes the Python-visible type.__subclasses__.
+        let subclasses: Vec<PyObjectRef> = cls_type
+            .subclasses
+            .read()
+            .iter()
+            .filter_map(|subclass| subclass.upgrade())
+            .collect();
 
-        for scls in subclasses.borrow_vec().iter() {
+        for scls in &subclasses {
             if subclass.is_subclass(scls, vm)? {
                 add_to_weak_set(&impl_data.cache, &subclass, vm)?;
                 return Ok(true);

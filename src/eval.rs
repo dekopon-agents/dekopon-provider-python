@@ -104,6 +104,8 @@ fn interpreter_with_sql(sql: bool) -> Interpreter {
         crate::policy::policy_module::module_def(&builder.ctx),
         crate::numeric::numeric_module::module_def(&builder.ctx),
         crate::time::time_module::module_def(&builder.ctx),
+        crate::entropy::entropy_module::module_def(&builder.ctx),
+        crate::random::module_def(&builder.ctx),
         crate::yaml::yaml_module::module_def(&builder.ctx),
     ]);
     if sql {
@@ -118,7 +120,15 @@ fn interpreter_with_sql(sql: bool) -> Interpreter {
     ]);
     builder
         .add_native_modules(&definitions)
+        .init_hook(|vm| {
+            // Resolve time through our frozen UTC facade, never the ambient native module.
+            rustpython_common::rc::PyRc::get_mut(&mut vm.state)
+                .expect("exclusive VM initialization")
+                .module_defs
+                .remove("time");
+        })
         .add_frozen_modules(rustpython_pylib::FROZEN_STDLIB)
+        .add_frozen_modules(include!(concat!(env!("OUT_DIR"), "/invocation_frozen.rs")))
         .build()
 }
 
@@ -221,13 +231,294 @@ mod tests {
 
     fn evaluate(script: &str) -> serde_json::Value {
         let script = script.to_owned();
+        on_python_thread(move || evaluate_on_current_thread(&script))
+    }
+
+    fn on_python_thread<R: Send + 'static>(f: impl FnOnce() -> R + Send + 'static) -> R {
         std::thread::Builder::new()
             .name("rustpython-test".to_owned())
             .stack_size(32 * 1024 * 1024)
-            .spawn(move || evaluate_on_current_thread(&script))
+            .spawn(f)
             .expect("spawn RustPython test thread")
             .join()
             .expect("RustPython test thread")
+    }
+
+    fn native(script: &str, entropy: Vec<u8>) -> (serde_json::Value, usize) {
+        use dekopon_provider_sdk_testkit::Native;
+        crate::entropy::READS.with(|r| r.set(0));
+        let output = Native::<crate::PythonProvider>::new()
+            .entropy(entropy)
+            .clock(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000))
+            .call("python.eval", &json!({"script": script}).to_string());
+        assert_eq!(output.status, 0, "{}", output.stderr);
+        let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(value["ok"], true, "{value}");
+        (
+            value["result"].clone(),
+            crate::entropy::READS.with(|r| r.get()),
+        )
+    }
+
+    #[test]
+    fn random_install_import_command_and_describe_read_no_entropy() {
+        on_python_thread(|| {
+            let (_, reads) = native("import random", vec![]);
+            assert_eq!(reads, 0);
+            let (_, reads) = native("", vec![]);
+            assert_eq!(reads, 0);
+            dekopon_provider_sdk::provider::manifest::<crate::PythonProvider>().unwrap();
+            let proposed = dekopon_provider_sdk::provider::command::<crate::PythonProvider>(
+                &["-c".into(), "import random".into()],
+                false,
+            );
+            assert!(matches!(
+                proposed,
+                dekopon_provider_sdk::CommandRunOutcome::Proposed { .. }
+            ));
+            assert_eq!(crate::entropy::READS.with(|r| r.get()), 0);
+        });
+    }
+
+    #[test]
+    fn random_is_lazy_and_integer_seeds_repeat_without_entropy() {
+        on_python_thread(|| {
+            let script = "import random\nresult=[str(random.getrandbits(64)), random.random(), random.randrange(100)]";
+            let (first, reads) = native(script, vec![1; 32]);
+            assert_eq!(reads, 1);
+            let (second, reads) = native(script, vec![2; 32]);
+            assert_eq!(reads, 1);
+            assert_ne!(first, second);
+            let script = "import random\nrandom.seed(7)\nresult=[str(random.getrandbits(64)), random.random()]";
+            let (first, reads) = native(script, vec![]);
+            assert_eq!(reads, 0);
+            let (second, reads) = native(script, vec![]);
+            assert_eq!(reads, 0);
+            assert_eq!(first, second);
+            let (_, reads) = native(
+                "import statistics as s\nresult=s.NormalDist().samples(3)",
+                vec![3; 32],
+            );
+            assert_eq!(reads, 1);
+        });
+    }
+
+    #[test]
+    fn explicit_datetime_conversions_do_not_need_an_invocation_clock() {
+        let output = evaluate(
+            "import datetime as d, time\nresult=[d.datetime.fromtimestamp(0).isoformat(), d.datetime.utcfromtimestamp(0).isoformat(), str(d.date.fromtimestamp(0)), time.strftime('%Y', time.gmtime(0))]",
+        );
+        assert_eq!(
+            output["result"],
+            json!([
+                "1970-01-01T00:00:00",
+                "1970-01-01T00:00:00",
+                "1970-01-01",
+                "1970"
+            ]),
+            "{output}"
+        );
+    }
+
+    #[test]
+    fn secrets_system_random_and_urandom_each_read_the_broker() {
+        on_python_thread(|| {
+            let (tokens, reads) = native(
+                "import secrets\nresult=[secrets.token_bytes(16).hex() for _ in range(3)]",
+                (0..48).collect(),
+            );
+            assert_eq!(reads, 3);
+            assert_eq!(
+                tokens,
+                json!([
+                    "000102030405060708090a0b0c0d0e0f",
+                    "101112131415161718191a1b1c1d1e1f",
+                    "202122232425262728292a2b2c2d2e2f",
+                ])
+            );
+            let (result, reads) = native(
+                "import random\nresult=[random._urandom(3).hex(), random.SystemRandom().random()]",
+                (0..10).collect(),
+            );
+            assert_eq!(reads, 2);
+            assert_eq!(result[0], "000102");
+            assert!(result[1].as_f64().is_some_and(|n| n > 0.0 && n < 1.0));
+        });
+    }
+
+    const OVERSIZED_ENTROPY: &str = r#"import random, secrets
+errors = []
+for draw in [lambda: secrets.token_bytes(10**9), lambda: secrets.token_bytes(2**63-1),
+             lambda: random._urandom(2**31-1), lambda: random.getrandbits(2**31-1),
+             lambda: random.randbytes(2**31)]:
+    try:
+        draw()
+        errors.append(None)
+    except ValueError as error:
+        errors.append(str(error))
+result = [errors, secrets.token_bytes(4).hex(), random.getrandbits(8) < 256]
+"#;
+
+    #[test]
+    fn oversized_entropy_requests_raise_and_the_invocation_keeps_working() {
+        on_python_thread(|| {
+            let (result, reads) = native(OVERSIZED_ENTROPY, (0..64).collect());
+            let errors = result[0].as_array().unwrap();
+            assert_eq!(errors.len(), 5, "{result}");
+            for error in errors {
+                assert!(
+                    error.as_str().is_some_and(|e| e.contains("exceeds")),
+                    "{result}"
+                );
+            }
+            assert_eq!(result[1], "00010203");
+            assert_eq!(result[2], true);
+            assert_eq!(reads, 2);
+        });
+    }
+
+    #[test]
+    fn out_of_invocation_entropy_fails_closed_before_sizing_a_buffer() {
+        // Each length would abort the process if allocated; the refusal must come first.
+        for script in [
+            "import random\nrandom._urandom(2**62)",
+            "import secrets\nsecrets.token_bytes(2**63-1)",
+            "import random\nrandom.getrandbits(2**62)",
+        ] {
+            let output = evaluate(script);
+            assert_eq!(
+                output["error"]["type"], "RuntimeError",
+                "{script}: {output}"
+            );
+        }
+    }
+
+    #[test]
+    fn container_abc_checks_work_after_subclasses_is_closed() {
+        on_python_thread(|| {
+            let (result, _) = native(
+                "import random, statistics, collections\nresult=[random.sample([1,2,3], 1)[0] in (1,2,3), sorted(random.sample((1,2), 2)), statistics.mode([1,1,2]), statistics.multimode('aab'), statistics.mode('ééa'), statistics.mode(range(3)), statistics.mode({1: 0}), statistics.mode(x for x in [3]), dict(collections.Counter('aab')), dict(collections.Counter({'a': 1})), dict(collections.Counter(collections.Counter('a')))]",
+                vec![5; 32],
+            );
+            assert_eq!(
+                result,
+                json!([true, [1, 2], 1, ["a"], "\u{e9}", 0, 1, 3, {"a": 2, "b": 1}, {"a": 1}, {"a": 1}])
+            );
+            let (result, _) = native(
+                "import random\ntry:\n    random.sample({1, 2}, 1)\n    result = None\nexcept TypeError:\n    result = 'TypeError'",
+                vec![5; 32],
+            );
+            assert_eq!(result, "TypeError");
+        });
+        let output = evaluate(
+            "import collections, statistics\nresult=[hasattr(collections, 'namedtuple'), hasattr(statistics, 'namedtuple'), collections.Counter('abb').most_common(1)]",
+        );
+        assert_eq!(
+            output["result"],
+            json!([false, false, [["b", 2]]]),
+            "{output}"
+        );
+        // A script's own iterable, and a registration that invalidates every negative ABC cache.
+        let output = evaluate(
+            "import collections, statistics\nclass Bag:\n    def __iter__(self):\n        return iter([2, 2, 1])\ncollections.abc.Sequence.register(Bag)\nresult=[sorted(collections.Counter(Bag()).items()), statistics.mode([4, 4, 1.5]), isinstance(5, collections.abc.Iterable)]",
+        );
+        assert_eq!(
+            output["result"],
+            json!([[[1, 1], [2, 2]], 4, false]),
+            "{output}"
+        );
+    }
+
+    #[test]
+    fn strptime_is_unavailable_as_documented() {
+        for call in [
+            "datetime.strptime('2020', '%Y')",
+            "date.strptime('2020', '%Y')",
+            "time.strptime('1', '%H')",
+        ] {
+            let output = evaluate(&format!(
+                "from datetime import date, datetime, time\n{call}"
+            ));
+            assert_eq!(output["error"]["type"], "ImportError", "{call}: {output}");
+        }
+    }
+
+    #[test]
+    fn new_modules_expose_no_os_sys_or_hash_attributes_and_refuse_byte_seeds() {
+        let result = evaluate(
+            "import random, secrets, datetime, statistics\nresult=[hasattr(random, '_os'), hasattr(random, '_sha512'), hasattr(secrets, 'compare_digest'), hasattr(statistics, 'sys'), hasattr(datetime.datetime.now.__func__, '__globals__') and 'sys' in datetime.datetime.now.__func__.__globals__]",
+        );
+        assert_eq!(
+            result["result"],
+            json!([false, false, false, false, false]),
+            "{result}"
+        );
+        for seed in ["'text'", "b'bytes'", "bytearray(b'bytes')"] {
+            let output = evaluate(&format!("import random\nrandom.seed({seed})"));
+            assert_eq!(output["error"]["type"], "TypeError", "{output}");
+            assert!(
+                output["error"]["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains("no hash primitives")
+            );
+        }
+    }
+
+    #[test]
+    fn entropy_and_datetime_fail_closed_outside_invocation() {
+        for script in [
+            "import random\nrandom.random()",
+            "import random\nrandom.getrandbits(0)",
+            "import random\nrandom.seed(7)\nrandom.random()",
+            "import random\nrandom._random.Random().random()",
+            "import random\nrandom.SystemRandom().random()",
+            "import random\nrandom._urandom(1)",
+            "import secrets\nsecrets.token_bytes(16)",
+            "import datetime\ndatetime.datetime.now()",
+            "import datetime\ndatetime.date.today()",
+            "import datetime\ndatetime.datetime.today()",
+            "import datetime\ndatetime.datetime.utcnow()",
+            "import time\ntime.gmtime()",
+            "import time\ntime.localtime()",
+            "import time\ntime.strftime('%Y')",
+        ] {
+            let output = evaluate(script);
+            assert_eq!(
+                output["error"]["type"], "RuntimeError",
+                "{script}: {output}"
+            );
+            assert!(
+                output["error"]["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains("unavailable outside invocation"),
+                "{output}"
+            );
+        }
+    }
+
+    #[test]
+    fn datetime_uses_invocation_utc_and_statistics_works() {
+        on_python_thread(|| {
+            let (result, reads) = native(
+                "import datetime as d, statistics as s, time\nn=d.datetime.now()\nresult=[n.isoformat(), str(d.date.today()), n.tzinfo is None, s.mean([1,2,3,4]), s.median([4,1,3,2]), time.strftime('%Y-%m-%d %H:%M:%S %Z', time.gmtime(0)), str(n.astimezone().tzinfo)]",
+                vec![],
+            );
+            assert_eq!(reads, 0);
+            assert_eq!(
+                result,
+                json!([
+                    "2023-11-14T22:13:20",
+                    "2023-11-14",
+                    true,
+                    2.5,
+                    2.5,
+                    "1970-01-01 00:00:00 UTC",
+                    "UTC"
+                ])
+            );
+        });
     }
 
     #[test]
@@ -298,8 +589,9 @@ result = {
         for script in [
             "import os",
             "import sys",
-            "import random",
-            "import secrets",
+            "import hashlib",
+            "import hmac",
+            "import ssl",
             "import socket",
             "import subprocess",
             "import ctypes",
