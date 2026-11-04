@@ -730,3 +730,151 @@ async fn sqlite_eval_supports_broker_entropy_utc_datetime_and_statistics() {
     assert_eq!(second["ok"], true, "{second}");
     assert_eq!(first["result"], second["result"]);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn executemany_writes_all_or_nothing_and_turso_reads_the_rows() {
+    let root = tempfile::tempdir().unwrap();
+    let host = StorageHost::open(
+        root.path().canonicalize().unwrap().join("storage"),
+        StorageLimits::default(),
+    )
+    .unwrap();
+    let registry = BrokerProviderRegistry::load_with_storage(
+        [path("DEKOPON_PROVIDER_COMPONENT"), turso_component()],
+        BrokerHostLimits::default(),
+        Some(host.clone()),
+    )
+    .await
+    .unwrap();
+    let python = |script: &str| {
+        let registry = &registry;
+        let host = &host;
+        let script = format!("import sqlite3\nc=sqlite3.connect()\n{script}");
+        async move {
+            call(
+                registry,
+                host,
+                "python",
+                "python.sqlite-eval",
+                json!({"script": script}),
+            )
+            .await
+            .unwrap()
+        }
+    };
+    let count = || async {
+        let t = call(
+            &registry,
+            &host,
+            "turso",
+            "turso.exec",
+            json!({"statements":["SELECT count(*), coalesce(sum(square),0) FROM mac_check"]}),
+        )
+        .await
+        .unwrap();
+        t["results"][0]["rows"][0].clone()
+    };
+    let created = python("c.execute('CREATE TABLE mac_check (n INTEGER, square INTEGER)')\nc.executemany('INSERT INTO mac_check VALUES (?, ?)', [(n, n * n) for n in range(1, 6)])\nc.commit()\nresult=c.execute('SELECT count(*), sum(square) FROM mac_check').fetchone()").await;
+    assert_eq!(created["result"], json!([5, 55]), "{created}");
+    let t = call(
+        &registry,
+        &host,
+        "turso",
+        "turso.exec",
+        json!({"statements":["INSERT INTO mac_check VALUES (6, 36)"]}),
+    )
+    .await
+    .unwrap();
+    assert!(t["results"].is_array(), "{t}");
+    let back =
+        python("result=c.execute('SELECT count(*), sum(square) FROM mac_check').fetchone()").await;
+    assert_eq!(back["result"], json!([6, 91]), "{back}");
+    // Each refused batch has a good first row. The script catches the refusal and commits, so
+    // only a refusal that wrote nothing leaves the table unchanged (not script-end rollback).
+    let refuse = |sql: &str, rows: &str| {
+        python(&format!(
+            "try:\n    c.executemany({sql:?}, {rows})\nexcept Exception as e:\n    result=type(e).__name__\nelse:\n    result='no error'\nc.commit()"
+        ))
+    };
+    for (name, rows, error) in [
+        ("bad type", "[(7, 49), (8, object())]", "TypeError"),
+        ("wrong count", "[(7, 49), (8,)]", "ValueError"),
+        ("oversize value", "[(7, 49), (8, 'x' * 4097)]", "ValueError"),
+        ("not a tuple", "[(7, 49), [8, 64]]", "TypeError"),
+        ("over the cap", "[(n, n) for n in range(257)]", "ValueError"),
+    ] {
+        let p = refuse("INSERT INTO mac_check VALUES (?, ?)", rows).await;
+        assert_eq!(p["result"], error, "{name}: {p}");
+        assert_eq!(count().await, json!([6, 91]), "{name} wrote rows");
+    }
+    let p = refuse("INSERT INTO mac_check VALUES (?, ?)", "[]").await;
+    assert_eq!(p["result"], "no error", "{p}");
+    assert_eq!(count().await, json!([6, 91]));
+    let p = refuse(
+        "-- batch\n/* of one */ INSERT INTO mac_check VALUES (?, ?)",
+        "[(7, 49)]",
+    )
+    .await;
+    assert_eq!(p["result"], "no error", "{p}");
+    assert_eq!(count().await, json!([7, 140]));
+    let p = refuse("/* only a comment */", "[]").await;
+    assert_eq!(p["result"], "ValueError", "{p}");
+    let at_cap = python("c.executemany('INSERT INTO mac_check VALUES (?, ?)', [(n, 0) for n in range(100, 356)])\nc.commit()").await;
+    assert_eq!(at_cap["ok"], true, "{at_cap}");
+    assert_eq!(count().await, json!([263, 140]));
+    // A step failure mid-batch undoes this call's rows but not earlier pending writes.
+    let p = python("c.execute('CREATE TABLE uniq (k INTEGER PRIMARY KEY)')\nc.execute('INSERT INTO uniq VALUES (1)')\ntry:\n    c.executemany('INSERT INTO uniq VALUES (?)', [(2,), (3,), (2,)])\nexcept ValueError:\n    pass\nresult=c.execute('SELECT k FROM uniq ORDER BY k').fetchall()\nc.commit()").await;
+    assert_eq!(p["result"], json!([[1]]), "{p}");
+    // An ordinary constraint failure keeps row 99; OR ROLLBACK makes the engine drop it.
+    let p = python("c.execute('CREATE TABLE keep (n INTEGER PRIMARY KEY)')\nc.commit()\nc.execute('INSERT INTO keep VALUES (99)')\ntry:\n    c.executemany('INSERT INTO keep VALUES (?)', [(1,), (1,)])\nexcept ValueError:\n    pass\nresult=c.execute('SELECT n FROM keep ORDER BY n').fetchall()\nc.commit()").await;
+    assert_eq!(p["result"], json!([[99]]), "{p}");
+    let p = python("c.execute('INSERT INTO keep VALUES (98)')\ntry:\n    c.executemany('INSERT OR ROLLBACK INTO keep VALUES (?)', [(1,), (1,)])\nexcept ValueError as e:\n    message=str(e)\nresult=[message, c.execute('SELECT n FROM keep ORDER BY n').fetchall()]").await;
+    assert_eq!(
+        p["result"],
+        json!([
+            "executemany failed and the engine rolled back the whole transaction: earlier pending writes were lost",
+            [[99]]
+        ]),
+        "{p}"
+    );
+    let p = python("c.execute('CREATE TABLE empty_t (n INTEGER)')\nc.commit()").await;
+    assert_eq!(p["ok"], true, "{p}");
+    for (name, sql, rows) in [
+        (
+            "insert returning",
+            "INSERT INTO uniq VALUES (?) RETURNING k",
+            "[(10,), (11,)]",
+        ),
+        (
+            "update returning on an empty table",
+            "UPDATE empty_t SET n = ? RETURNING n",
+            "[(1,)]",
+        ),
+        ("select", "SELECT ?", "[(1,)]"),
+    ] {
+        let p = refuse(sql, rows).await;
+        assert_eq!(p["result"], "ValueError", "{name}: {p}");
+    }
+    let t = call(
+        &registry,
+        &host,
+        "turso",
+        "turso.exec",
+        json!({"statements":["SELECT count(*) FROM uniq"]}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(t["results"][0]["rows"][0][0], 1, "{t}");
+    let p = python("c.execute('CREATE TABLE pending_t (n INTEGER)')\nc.commit()\nc.execute('/* write */ INSERT INTO pending_t VALUES (1)')").await;
+    assert_eq!(p["ok"], true, "{p}");
+    let t = call(
+        &registry,
+        &host,
+        "turso",
+        "turso.exec",
+        json!({"statements":["SELECT count(*) FROM pending_t"]}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(t["results"][0]["rows"][0][0], 0, "{t}");
+}

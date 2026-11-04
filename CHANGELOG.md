@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- `python sql` scripts can call `Connection.executemany(sql, list_of_tuples)`; it writes up to 256 rows all or nothing instead of raising `AttributeError`.
+
 ## [0.10.0] - 2026-10-28
 
 ### Added

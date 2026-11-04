@@ -47,7 +47,7 @@ pub(crate) mod sqlite_module {
     use super::*;
     use rustpython_vm::{
         TryFromObject,
-        builtins::{PyTupleRef, PyTypeRef},
+        builtins::{PyList, PyTuple, PyTupleRef, PyTypeRef},
     };
 
     #[pyattr(name = "ProgrammingError", once)]
@@ -101,9 +101,7 @@ pub(crate) mod sqlite_module {
             vm: &VirtualMachine,
         ) -> PyResult<Cursor> {
             self.ensure_open(vm)?;
-            if sql.as_str().is_empty() || sql.as_str().len() > 4096 {
-                return Err(vm.new_value_error("SQL exceeds 4096 bytes or is empty"));
-            }
+            check_sql(&sql, vm)?;
             if parameters.args.len() > 1
                 || parameters.kwargs.keys().any(|k| k != "parameters")
                 || (!parameters.args.is_empty() && !parameters.kwargs.is_empty())
@@ -119,59 +117,33 @@ pub(crate) mod sqlite_module {
                 .map(|p| PyTupleRef::try_from_object(vm, p.clone()))
                 .transpose()?;
             // Validate parameters before preparing against broker-owned durable files.
-            if let Some(params) = &params {
-                if params.len() > 64 {
-                    return Err(vm.new_value_error("too many parameters"));
-                }
-                for param in params.iter() {
-                    let _ = parameter(param, vm)?;
-                }
-            }
-            let connection = self.connection(vm)?.0;
-            let stmt = connection
-                .prepare(sql.as_str())
-                .map_err(|_| vm.new_value_error("SQL prepare failed"))?;
-            if !sql.as_str()[stmt.tail_offset()..]
-                .trim_matches(|c: char| c.is_whitespace() || c == ';')
-                .is_empty()
-            {
-                return Err(vm.new_value_error("execute accepts one statement"));
-            }
-            if stmt.parameters_count() != params.as_ref().map_or(0, |p| p.len()) {
-                return Err(vm.new_value_error("parameter count mismatch"));
-            }
-            drop(stmt);
-            if connection.get_auto_commit()
-                && ["insert", "update", "delete", "replace"].contains(
-                    &sql.as_str()
-                        .split_whitespace()
-                        .next()
-                        .unwrap_or("")
-                        .to_ascii_lowercase()
-                        .as_str(),
-                )
-            {
-                run_sql(&connection, &self.connection(vm)?.1, "BEGIN", vm)?;
+            let values = params
+                .as_ref()
+                .map(|params| tuple_values(params, vm))
+                .transpose()?;
+            let (connection, engine) = self.connection(vm)?;
+            check_statement(
+                &connection,
+                &sql,
+                Some(values.as_ref().map_or(0, Vec::len)),
+                vm,
+            )?;
+            if connection.get_auto_commit() && is_write(&sql) {
+                run_sql(&connection, &engine, "BEGIN", vm)?;
             }
             let mut stmt = connection
                 .prepare(sql.as_str())
                 .map_err(|_| vm.new_value_error("SQL prepare failed"))?;
-            if let Some(params) = &params {
-                for (index, param) in params.iter().enumerate() {
-                    stmt.bind_at(NonZeroUsize::new(index + 1).unwrap(), parameter(param, vm)?)
-                        .map_err(|_| vm.new_value_error("SQL binding failed"))?;
-                }
-            }
+            bind_all(&mut stmt, values.unwrap_or_default(), vm)?;
             let mut rows = Vec::new();
             let mut bytes = 0;
-            let engine = self.connection(vm)?.1;
             loop {
                 match stmt
                     .step()
                     .map_err(|_| vm.new_value_error("SQL step failed"))?
                 {
                     StepResult::Row => {
-                        if rows.len() >= 256 {
+                        if rows.len() >= MAX_ROWS {
                             return Err(vm.new_value_error("SQL result exceeds 256 rows"));
                         }
                         let row = stmt
@@ -193,6 +165,90 @@ pub(crate) mod sqlite_module {
             }
             Ok(Cursor {
                 rows: RefCell::new(rows),
+                index: RefCell::new(0),
+                closed: Rc::clone(&self.closed),
+            })
+        }
+
+        #[pymethod]
+        fn executemany(
+            &self,
+            sql: PyUtf8StrRef,
+            seq_of_parameters: rustpython_vm::PyObjectRef,
+            vm: &VirtualMachine,
+        ) -> PyResult<Cursor> {
+            self.ensure_open(vm)?;
+            check_sql(&sql, vm)?;
+            if !is_write(&sql) {
+                return Err(vm.new_value_error(
+                    "executemany accepts INSERT, UPDATE, DELETE or REPLACE statements",
+                ));
+            }
+            let tuples: Vec<rustpython_vm::PyObjectRef> =
+                if let Some(list) = seq_of_parameters.downcast_ref::<PyList>() {
+                    let items = list.borrow_vec();
+                    if items.len() > MAX_ROWS {
+                        return Err(vm.new_value_error("executemany exceeds 256 parameter tuples"));
+                    }
+                    items.to_vec()
+                } else if let Some(tuple) = seq_of_parameters.downcast_ref::<PyTuple>() {
+                    if tuple.len() > MAX_ROWS {
+                        return Err(vm.new_value_error("executemany exceeds 256 parameter tuples"));
+                    }
+                    tuple.to_vec()
+                } else {
+                    return Err(vm.new_type_error(
+                        "executemany accepts a list or tuple of parameter tuples",
+                    ));
+                };
+            // Validate every tuple before the first write: nothing below can refuse a row
+            // for type, count or size, so only a step failure remains after BEGIN.
+            let batch = tuples
+                .into_iter()
+                .map(|item| {
+                    let tuple = PyTupleRef::try_from_object(vm, item)?;
+                    tuple_values(&tuple, vm)
+                })
+                .collect::<PyResult<Vec<_>>>()?;
+            let (connection, engine) = self.connection(vm)?;
+            let columns = check_statement(&connection, &sql, batch.first().map(Vec::len), vm)?;
+            if columns > 0 {
+                return Err(vm.new_value_error("executemany statement must not return rows"));
+            }
+            if batch.iter().any(|values| values.len() != batch[0].len()) {
+                return Err(vm.new_value_error("parameter count mismatch"));
+            }
+            if !batch.is_empty() {
+                let had_pending = !connection.get_auto_commit();
+                if !had_pending {
+                    run_sql(&connection, &engine, "BEGIN", vm)?;
+                }
+                run_sql(&connection, &engine, "SAVEPOINT executemany", vm)?;
+                let written = batch
+                    .into_iter()
+                    .try_for_each(|values| write_row(&connection, &engine, &sql, values, vm));
+                match written {
+                    Ok(()) => run_sql(&connection, &engine, "RELEASE executemany", vm)?,
+                    Err(error) => {
+                        if connection.get_auto_commit() {
+                            // The engine already rolled back the whole transaction (an
+                            // `OR ROLLBACK` conflict clause) and dropped the savepoint.
+                            return Err(vm.new_value_error(if had_pending {
+                                "executemany failed and the engine rolled back the whole \
+                                 transaction: earlier pending writes were lost"
+                            } else {
+                                "executemany failed and the engine rolled back the transaction"
+                            }));
+                        }
+                        // Undo only this call's rows; earlier pending writes stay pending.
+                        run_sql(&connection, &engine, "ROLLBACK TO executemany", vm)?;
+                        run_sql(&connection, &engine, "RELEASE executemany", vm)?;
+                        return Err(error);
+                    }
+                }
+            }
+            Ok(Cursor {
+                rows: RefCell::new(Vec::new()),
                 index: RefCell::new(0),
                 closed: Rc::clone(&self.closed),
             })
@@ -282,6 +338,109 @@ pub(crate) mod sqlite_module {
         Ok(SqlConnection {
             closed: Rc::new(Cell::new(false)),
         })
+    }
+}
+
+const MAX_ROWS: usize = 256;
+const WRITE_VERBS: [&str; 4] = ["insert", "update", "delete", "replace"];
+
+fn first_keyword(sql: &str) -> String {
+    let mut rest = sql;
+    loop {
+        rest = rest.trim_start();
+        if let Some(after) = rest.strip_prefix("--") {
+            rest = after.split_once('\n').map_or("", |(_, tail)| tail);
+        } else if let Some(after) = rest.strip_prefix("/*") {
+            rest = after.split_once("*/").map_or("", |(_, tail)| tail);
+        } else {
+            break;
+        }
+    }
+    rest.chars()
+        .take_while(char::is_ascii_alphabetic)
+        .collect::<String>()
+        .to_ascii_lowercase()
+}
+
+fn check_sql(sql: &PyUtf8StrRef, vm: &VirtualMachine) -> PyResult<()> {
+    if sql.as_str().is_empty() || sql.as_str().len() > 4096 {
+        return Err(vm.new_value_error("SQL exceeds 4096 bytes or is empty"));
+    }
+    Ok(())
+}
+
+fn is_write(sql: &PyUtf8StrRef) -> bool {
+    WRITE_VERBS.contains(&first_keyword(sql.as_str()).as_str())
+}
+
+fn tuple_values(
+    params: &rustpython_vm::builtins::PyTupleRef,
+    vm: &VirtualMachine,
+) -> PyResult<Vec<Value>> {
+    if params.len() > 64 {
+        return Err(vm.new_value_error("too many parameters"));
+    }
+    params.iter().map(|param| parameter(param, vm)).collect()
+}
+
+fn check_statement(
+    connection: &Arc<Connection>,
+    sql: &PyUtf8StrRef,
+    parameter_count: Option<usize>,
+    vm: &VirtualMachine,
+) -> PyResult<usize> {
+    let stmt = connection
+        .prepare(sql.as_str())
+        .map_err(|_| vm.new_value_error("SQL prepare failed"))?;
+    if !sql.as_str()[stmt.tail_offset()..]
+        .trim_matches(|c: char| c.is_whitespace() || c == ';')
+        .is_empty()
+    {
+        return Err(vm.new_value_error("execute accepts one statement"));
+    }
+    if parameter_count.is_some_and(|count| stmt.parameters_count() != count) {
+        return Err(vm.new_value_error("parameter count mismatch"));
+    }
+    Ok(stmt.num_columns())
+}
+
+fn bind_all(
+    stmt: &mut dekopon_turso_sql_io::turso_core::Statement,
+    values: Vec<Value>,
+    vm: &VirtualMachine,
+) -> PyResult<()> {
+    for (index, value) in values.into_iter().enumerate() {
+        stmt.bind_at(NonZeroUsize::new(index + 1).unwrap(), value)
+            .map_err(|_| vm.new_value_error("SQL binding failed"))?;
+    }
+    Ok(())
+}
+
+fn write_row(
+    connection: &Arc<Connection>,
+    engine: &Arc<dyn IO>,
+    sql: &PyUtf8StrRef,
+    values: Vec<Value>,
+    vm: &VirtualMachine,
+) -> PyResult<()> {
+    let mut stmt = connection
+        .prepare(sql.as_str())
+        .map_err(|_| vm.new_value_error("SQL prepare failed"))?;
+    bind_all(&mut stmt, values, vm)?;
+    loop {
+        match stmt
+            .step()
+            .map_err(|_| vm.new_value_error("SQL step failed"))?
+        {
+            StepResult::Row => {
+                return Err(vm.new_value_error("executemany statement must not return rows"));
+            }
+            StepResult::IO => engine
+                .step()
+                .map_err(|_| vm.new_value_error("SQL I/O failed"))?,
+            StepResult::Done => return Ok(()),
+            _ => return Err(vm.new_value_error("SQL interrupted or busy")),
+        }
     }
 }
 

@@ -73,7 +73,7 @@ pub struct Python {
 enum PythonCommand {
     /// Persistent SQL (requires python.sqlite-eval)
     #[command(
-        after_help = "sqlite3 subset: connect() is pathless; execute(sql, tuple) runs one statement; fetchone()/fetchall() return at most 256 rows / 128 KiB per statement; commit(), rollback(), close() manage pending writes. dekopon_requests and dekopon_subshell import when built but calls raise 'http not granted' / 'spawn not granted' under this capability."
+        after_help = "sqlite3 subset: connect() is pathless; execute(sql, tuple) runs one statement; executemany(sql, list of tuples) runs one INSERT/UPDATE/DELETE/REPLACE per tuple, at most 256 tuples, all or nothing; fetchone()/fetchall() return at most 256 rows / 128 KiB per statement; commit(), rollback(), close() manage pending writes. dekopon_requests and dekopon_subshell import when built but calls raise 'http not granted' / 'spawn not granted' under this capability."
     )]
     Sql {
         /// Run CODE as the SQL-capable Python script
@@ -225,6 +225,8 @@ mod tests {
         for phrase in [
             "connect()",
             "execute(sql, tuple)",
+            "executemany(sql, list of tuples)",
+            "at most 256 tuples, all or nothing",
             "fetchone()",
             "fetchall()",
             "commit()",
