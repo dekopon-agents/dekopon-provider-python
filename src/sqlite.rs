@@ -240,7 +240,6 @@ pub(crate) mod sqlite_module {
                                 "executemany failed and the engine rolled back the transaction"
                             }));
                         }
-                        // Undo only this call's rows; earlier pending writes stay pending.
                         run_sql(&connection, &engine, "ROLLBACK TO executemany", vm)?;
                         run_sql(&connection, &engine, "RELEASE executemany", vm)?;
                         return Err(error);
@@ -396,7 +395,7 @@ fn check_statement(
         .trim_matches(|c: char| c.is_whitespace() || c == ';')
         .is_empty()
     {
-        return Err(vm.new_value_error("execute accepts one statement"));
+        return Err(vm.new_value_error("one statement only"));
     }
     if parameter_count.is_some_and(|count| stmt.parameters_count() != count) {
         return Err(vm.new_value_error("parameter count mismatch"));
