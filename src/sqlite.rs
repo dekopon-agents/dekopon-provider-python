@@ -207,7 +207,8 @@ pub(crate) mod sqlite_module {
                 return Err(vm.new_value_error("parameter count mismatch"));
             }
             if !batch.is_empty() {
-                if connection.get_auto_commit() {
+                let had_pending = !connection.get_auto_commit();
+                if !had_pending {
                     run_sql(&connection, &engine, "BEGIN", vm)?;
                 }
                 run_sql(&connection, &engine, "SAVEPOINT executemany", vm)?;
@@ -217,6 +218,16 @@ pub(crate) mod sqlite_module {
                 match written {
                     Ok(()) => run_sql(&connection, &engine, "RELEASE executemany", vm)?,
                     Err(error) => {
+                        if connection.get_auto_commit() {
+                            // The engine already rolled back the whole transaction (an
+                            // `OR ROLLBACK` conflict clause) and dropped the savepoint.
+                            return Err(vm.new_value_error(if had_pending {
+                                "executemany failed and the engine rolled back the whole \
+                                 transaction: earlier pending writes were lost"
+                            } else {
+                                "executemany failed and the engine rolled back the transaction"
+                            }));
+                        }
                         // Undo only this call's rows; earlier pending writes stay pending.
                         run_sql(&connection, &engine, "ROLLBACK TO executemany", vm)?;
                         run_sql(&connection, &engine, "RELEASE executemany", vm)?;

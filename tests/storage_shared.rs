@@ -810,6 +810,18 @@ async fn executemany_writes_all_or_nothing_and_turso_reads_the_rows() {
     // A step failure mid-batch undoes this call's rows but not earlier pending writes.
     let p = python("c.execute('CREATE TABLE uniq (k INTEGER PRIMARY KEY)')\nc.execute('INSERT INTO uniq VALUES (1)')\ntry:\n    c.executemany('INSERT INTO uniq VALUES (?)', [(2,), (3,), (2,)])\nexcept ValueError:\n    pass\nresult=c.execute('SELECT k FROM uniq ORDER BY k').fetchall()\nc.commit()").await;
     assert_eq!(p["result"], json!([[1]]), "{p}");
+    // An ordinary constraint failure keeps row 99; OR ROLLBACK makes the engine drop it.
+    let p = python("c.execute('CREATE TABLE keep (n INTEGER PRIMARY KEY)')\nc.commit()\nc.execute('INSERT INTO keep VALUES (99)')\ntry:\n    c.executemany('INSERT INTO keep VALUES (?)', [(1,), (1,)])\nexcept ValueError:\n    pass\nresult=c.execute('SELECT n FROM keep ORDER BY n').fetchall()\nc.commit()").await;
+    assert_eq!(p["result"], json!([[99]]), "{p}");
+    let p = python("c.execute('INSERT INTO keep VALUES (98)')\ntry:\n    c.executemany('INSERT OR ROLLBACK INTO keep VALUES (?)', [(1,), (1,)])\nexcept ValueError as e:\n    message=str(e)\nresult=[message, c.execute('SELECT n FROM keep ORDER BY n').fetchall()]").await;
+    assert_eq!(
+        p["result"],
+        json!([
+            "executemany failed and the engine rolled back the whole transaction: earlier pending writes were lost",
+            [[99]]
+        ]),
+        "{p}"
+    );
     // A row-returning statement is refused and leaves nothing behind.
     let p =
         python("c.executemany('INSERT INTO uniq VALUES (?) RETURNING k', [(10,), (11,)])").await;

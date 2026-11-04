@@ -157,7 +157,9 @@ capability can import `sqlite3`; `connect()` accepts no path or URI and uses the
 bytes parameters; `executemany(sql, list_of_tuples)` runs one INSERT, UPDATE, DELETE or REPLACE
 statement once per tuple, at most 256 tuples, each under `execute`'s limits, and is all-or-nothing:
 every tuple is validated before the first write, and a row that fails undoes this call's rows
-only (earlier pending writes stay pending); a statement that returns rows is refused. `fetchone()` and `fetchall()` return bounded rows; `commit()`, `rollback()`,
+only (earlier pending writes stay pending), except that an `OR ROLLBACK` conflict clause makes
+the engine roll back the whole transaction, which loses earlier pending writes and is reported as
+such; a statement that returns rows is refused. `fetchone()` and `fetchall()` return bounded rows; `commit()`, `rollback()`,
 and `close()` finish or discard pending writes. An uncommitted transaction is rolled back
 at script end (including on an exception); close invalidates the connection and cursors.
 The adapter checkpoints committed WAL frames on every invocation. Grant `storage` to
