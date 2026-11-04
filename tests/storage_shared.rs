@@ -867,4 +867,17 @@ async fn executemany_writes_all_or_nothing_and_turso_reads_the_rows() {
     .await
     .unwrap();
     assert_eq!(t["results"][0]["rows"][0][0], 1, "{t}");
+    // A comment before the verb must not skip the implicit BEGIN: no commit() means not durable.
+    let p = python("c.execute('CREATE TABLE pending_t (n INTEGER)')\nc.commit()\nc.execute('/* write */ INSERT INTO pending_t VALUES (1)')").await;
+    assert_eq!(p["ok"], true, "{p}");
+    let t = call(
+        &registry,
+        &host,
+        "turso",
+        "turso.exec",
+        json!({"statements":["SELECT count(*) FROM pending_t"]}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(t["results"][0]["rows"][0][0], 0, "{t}");
 }

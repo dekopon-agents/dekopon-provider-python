@@ -179,7 +179,7 @@ pub(crate) mod sqlite_module {
         ) -> PyResult<Cursor> {
             self.ensure_open(vm)?;
             check_sql(&sql, vm)?;
-            if !WRITE_VERBS.contains(&first_keyword(sql.as_str()).as_str()) {
+            if !is_write(&sql) {
                 return Err(vm.new_value_error(
                     "executemany accepts INSERT, UPDATE, DELETE or REPLACE statements",
                 ));
@@ -370,14 +370,7 @@ fn check_sql(sql: &PyUtf8StrRef, vm: &VirtualMachine) -> PyResult<()> {
 }
 
 fn is_write(sql: &PyUtf8StrRef) -> bool {
-    ["insert", "update", "delete", "replace"].contains(
-        &sql.as_str()
-            .split_whitespace()
-            .next()
-            .unwrap_or("")
-            .to_ascii_lowercase()
-            .as_str(),
-    )
+    WRITE_VERBS.contains(&first_keyword(sql.as_str()).as_str())
 }
 
 fn tuple_values(
