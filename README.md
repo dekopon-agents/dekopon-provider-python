@@ -4,9 +4,9 @@ A WebAssembly component with broker-granted HTTP and child-script execution expo
 read-only `python.eval` and a separately authorized local-write `python.sqlite-eval`
 (backed by the shared fixed `main.db` namespace). It embeds **RustPython 0.5.0 exactly**, creates a fresh interpreter per call,
 captures bounded stdout in Rust, and returns only a bounded JSON-shaped result. A Dekopon shell
-reaches it through the `python` command word. Version 0.10.0 adds broker-entropy `random` and `secrets`,
-invocation-clock UTC `datetime` and `statistics`; 0.9.0 added the separately granted
-`python.sqlite-eval` and bounded stdlib imports. Both pin the published Dekopon SDK 0.33.0. It exports `run-command` through
+reaches it through the `python` command word. Version 0.10.1 adds `Connection.executemany` to `python sql`
+and keeps a comment-led `execute` write pending until `commit()`; 0.10.0 added broker-entropy `random`
+and `secrets`, invocation-clock UTC `datetime` and `statistics`. Both releases pin the published Dekopon SDK 0.33.0. It exports `run-command` through
 the current provider world.
 
 > **Release status: owner-approved.** The owner accepted the exact LGPL dependencies for this
