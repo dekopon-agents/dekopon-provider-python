@@ -122,7 +122,12 @@ pub(crate) mod sqlite_module {
                 .map(|params| tuple_values(params, vm))
                 .transpose()?;
             let (connection, engine) = self.connection(vm)?;
-            check_statement(&connection, &sql, values.as_ref().map_or(0, Vec::len), vm)?;
+            check_statement(
+                &connection,
+                &sql,
+                Some(values.as_ref().map_or(0, Vec::len)),
+                vm,
+            )?;
             if connection.get_auto_commit() && is_write(&sql) {
                 run_sql(&connection, &engine, "BEGIN", vm)?;
             }
@@ -174,24 +179,28 @@ pub(crate) mod sqlite_module {
         ) -> PyResult<Cursor> {
             self.ensure_open(vm)?;
             check_sql(&sql, vm)?;
-            if !is_write(&sql) {
+            if !WRITE_VERBS.contains(&first_keyword(sql.as_str()).as_str()) {
                 return Err(vm.new_value_error(
                     "executemany accepts INSERT, UPDATE, DELETE or REPLACE statements",
                 ));
             }
             let tuples: Vec<rustpython_vm::PyObjectRef> =
                 if let Some(list) = seq_of_parameters.downcast_ref::<PyList>() {
-                    list.borrow_vec().to_vec()
+                    let items = list.borrow_vec();
+                    if items.len() > MAX_ROWS {
+                        return Err(vm.new_value_error("executemany exceeds 256 parameter tuples"));
+                    }
+                    items.to_vec()
                 } else if let Some(tuple) = seq_of_parameters.downcast_ref::<PyTuple>() {
+                    if tuple.len() > MAX_ROWS {
+                        return Err(vm.new_value_error("executemany exceeds 256 parameter tuples"));
+                    }
                     tuple.to_vec()
                 } else {
                     return Err(vm.new_type_error(
                         "executemany accepts a list or tuple of parameter tuples",
                     ));
                 };
-            if tuples.len() > MAX_ROWS {
-                return Err(vm.new_value_error("executemany exceeds 256 parameter tuples"));
-            }
             // Validate every tuple before the first write: nothing below can refuse a row
             // for type, count or size, so only a step failure remains after BEGIN.
             let batch = tuples
@@ -202,7 +211,10 @@ pub(crate) mod sqlite_module {
                 })
                 .collect::<PyResult<Vec<_>>>()?;
             let (connection, engine) = self.connection(vm)?;
-            check_statement(&connection, &sql, batch.first().map_or(0, Vec::len), vm)?;
+            let columns = check_statement(&connection, &sql, batch.first().map(Vec::len), vm)?;
+            if columns > 0 {
+                return Err(vm.new_value_error("executemany statement must not return rows"));
+            }
             if batch.iter().any(|values| values.len() != batch[0].len()) {
                 return Err(vm.new_value_error("parameter count mismatch"));
             }
@@ -330,6 +342,25 @@ pub(crate) mod sqlite_module {
 }
 
 const MAX_ROWS: usize = 256;
+const WRITE_VERBS: [&str; 4] = ["insert", "update", "delete", "replace"];
+
+fn first_keyword(sql: &str) -> String {
+    let mut rest = sql;
+    loop {
+        rest = rest.trim_start();
+        if let Some(after) = rest.strip_prefix("--") {
+            rest = after.split_once('\n').map_or("", |(_, tail)| tail);
+        } else if let Some(after) = rest.strip_prefix("/*") {
+            rest = after.split_once("*/").map_or("", |(_, tail)| tail);
+        } else {
+            break;
+        }
+    }
+    rest.chars()
+        .take_while(char::is_ascii_alphabetic)
+        .collect::<String>()
+        .to_ascii_lowercase()
+}
 
 fn check_sql(sql: &PyUtf8StrRef, vm: &VirtualMachine) -> PyResult<()> {
     if sql.as_str().is_empty() || sql.as_str().len() > 4096 {
@@ -359,13 +390,12 @@ fn tuple_values(
     params.iter().map(|param| parameter(param, vm)).collect()
 }
 
-/// Prepares once to reject multiple statements and a wrong parameter count.
 fn check_statement(
     connection: &Arc<Connection>,
     sql: &PyUtf8StrRef,
-    parameter_count: usize,
+    parameter_count: Option<usize>,
     vm: &VirtualMachine,
-) -> PyResult<()> {
+) -> PyResult<usize> {
     let stmt = connection
         .prepare(sql.as_str())
         .map_err(|_| vm.new_value_error("SQL prepare failed"))?;
@@ -375,10 +405,10 @@ fn check_statement(
     {
         return Err(vm.new_value_error("execute accepts one statement"));
     }
-    if stmt.parameters_count() != parameter_count {
+    if parameter_count.is_some_and(|count| stmt.parameters_count() != count) {
         return Err(vm.new_value_error("parameter count mismatch"));
     }
-    Ok(())
+    Ok(stmt.num_columns())
 }
 
 fn bind_all(
@@ -393,7 +423,6 @@ fn bind_all(
     Ok(())
 }
 
-/// Runs one executemany row; a statement that returns rows is not a write.
 fn write_row(
     connection: &Arc<Connection>,
     engine: &Arc<dyn IO>,
