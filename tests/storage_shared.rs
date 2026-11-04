@@ -807,7 +807,6 @@ async fn executemany_writes_all_or_nothing_and_turso_reads_the_rows() {
         assert_eq!(p["result"], error, "{name}: {p}");
         assert_eq!(count().await, json!([6, 91]), "{name} wrote rows");
     }
-    // An empty batch is a no-op; a comment before the verb does not hide the statement.
     let p = refuse("INSERT INTO mac_check VALUES (?, ?)", "[]").await;
     assert_eq!(p["result"], "no error", "{p}");
     assert_eq!(count().await, json!([6, 91]));
@@ -838,7 +837,6 @@ async fn executemany_writes_all_or_nothing_and_turso_reads_the_rows() {
         ]),
         "{p}"
     );
-    // A row-returning statement is refused even when it would return no rows.
     let p = python("c.execute('CREATE TABLE empty_t (n INTEGER)')\nc.commit()").await;
     assert_eq!(p["ok"], true, "{p}");
     for (name, sql, rows) in [
@@ -867,7 +865,6 @@ async fn executemany_writes_all_or_nothing_and_turso_reads_the_rows() {
     .await
     .unwrap();
     assert_eq!(t["results"][0]["rows"][0][0], 1, "{t}");
-    // A comment before the verb must not skip the implicit BEGIN: no commit() means not durable.
     let p = python("c.execute('CREATE TABLE pending_t (n INTEGER)')\nc.commit()\nc.execute('/* write */ INSERT INTO pending_t VALUES (1)')").await;
     assert_eq!(p["ok"], true, "{p}");
     let t = call(

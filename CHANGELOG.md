@@ -5,7 +5,6 @@
 ### Fixed
 
 - `python sql` scripts can call `Connection.executemany(sql, list_of_tuples)`; it writes up to 256 rows all or nothing instead of raising `AttributeError`.
-- `python sql` `execute` treats a statement that starts with a SQL comment as the write it is, so it stays pending until `commit()` instead of persisting at once.
 
 ## [0.10.0] - 2026-10-28
 
