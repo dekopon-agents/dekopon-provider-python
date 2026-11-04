@@ -730,3 +730,100 @@ async fn sqlite_eval_supports_broker_entropy_utc_datetime_and_statistics() {
     assert_eq!(second["ok"], true, "{second}");
     assert_eq!(first["result"], second["result"]);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn executemany_writes_all_or_nothing_and_turso_reads_the_rows() {
+    let root = tempfile::tempdir().unwrap();
+    let host = StorageHost::open(
+        root.path().canonicalize().unwrap().join("storage"),
+        StorageLimits::default(),
+    )
+    .unwrap();
+    let registry = BrokerProviderRegistry::load_with_storage(
+        [path("DEKOPON_PROVIDER_COMPONENT"), turso_component()],
+        BrokerHostLimits::default(),
+        Some(host.clone()),
+    )
+    .await
+    .unwrap();
+    let python = |script: &str| {
+        let registry = &registry;
+        let host = &host;
+        let script = format!("import sqlite3\nc=sqlite3.connect()\n{script}");
+        async move {
+            call(
+                registry,
+                host,
+                "python",
+                "python.sqlite-eval",
+                json!({"script": script}),
+            )
+            .await
+            .unwrap()
+        }
+    };
+    let count = || async {
+        let t = call(
+            &registry,
+            &host,
+            "turso",
+            "turso.exec",
+            json!({"statements":["SELECT count(*), coalesce(sum(square),0) FROM mac_check"]}),
+        )
+        .await
+        .unwrap();
+        t["results"][0]["rows"][0].clone()
+    };
+    let created = python("c.execute('CREATE TABLE mac_check (n INTEGER, square INTEGER)')\nc.executemany('INSERT INTO mac_check VALUES (?, ?)', [(n, n * n) for n in range(1, 6)])\nc.commit()\nresult=c.execute('SELECT count(*), sum(square) FROM mac_check').fetchone()").await;
+    assert_eq!(created["result"], json!([5, 55]), "{created}");
+    let t = call(
+        &registry,
+        &host,
+        "turso",
+        "turso.exec",
+        json!({"statements":["INSERT INTO mac_check VALUES (6, 36)"]}),
+    )
+    .await
+    .unwrap();
+    assert!(t["results"].is_array(), "{t}");
+    let back =
+        python("result=c.execute('SELECT count(*), sum(square) FROM mac_check').fetchone()").await;
+    assert_eq!(back["result"], json!([6, 91]), "{back}");
+    // Each refused batch has a good first row, so a write before validation would show.
+    for (name, rows) in [
+        ("bad type", "[(7, 49), (8, object())]"),
+        ("wrong count", "[(7, 49), (8,)]"),
+        ("oversize value", "[(7, 49), (8, 'x' * 4097)]"),
+        ("not a tuple", "[(7, 49), [8, 64]]"),
+        ("over the cap", "[(n, n) for n in range(257)]"),
+    ] {
+        let p = python(&format!(
+            "c.executemany('INSERT INTO mac_check VALUES (?, ?)', {rows})"
+        ))
+        .await;
+        assert_eq!(p["ok"], false, "{name}: {p}");
+        assert_eq!(count().await, json!([6, 91]), "{name} wrote rows");
+    }
+    let at_cap = python("c.executemany('INSERT INTO mac_check VALUES (?, ?)', [(n, 0) for n in range(100, 356)])\nc.commit()").await;
+    assert_eq!(at_cap["ok"], true, "{at_cap}");
+    assert_eq!(count().await, json!([262, 91]));
+    // A step failure mid-batch undoes this call's rows but not earlier pending writes.
+    let p = python("c.execute('CREATE TABLE uniq (k INTEGER PRIMARY KEY)')\nc.execute('INSERT INTO uniq VALUES (1)')\ntry:\n    c.executemany('INSERT INTO uniq VALUES (?)', [(2,), (3,), (2,)])\nexcept ValueError:\n    pass\nresult=c.execute('SELECT k FROM uniq ORDER BY k').fetchall()\nc.commit()").await;
+    assert_eq!(p["result"], json!([[1]]), "{p}");
+    // A row-returning statement is refused and leaves nothing behind.
+    let p =
+        python("c.executemany('INSERT INTO uniq VALUES (?) RETURNING k', [(10,), (11,)])").await;
+    assert_eq!(p["ok"], false, "{p}");
+    let p = python("c.executemany('SELECT ?', [(1,)])").await;
+    assert_eq!(p["ok"], false, "{p}");
+    let t = call(
+        &registry,
+        &host,
+        "turso",
+        "turso.exec",
+        json!({"statements":["SELECT count(*) FROM uniq"]}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(t["results"][0]["rows"][0][0], 1, "{t}");
+}
