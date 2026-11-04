@@ -789,8 +789,7 @@ async fn executemany_writes_all_or_nothing_and_turso_reads_the_rows() {
     let back =
         python("result=c.execute('SELECT count(*), sum(square) FROM mac_check').fetchone()").await;
     assert_eq!(back["result"], json!([6, 91]), "{back}");
-    // Each refused batch has a good first row. The script catches the refusal and commits, so
-    // only a refusal that wrote nothing leaves the table unchanged (not script-end rollback).
+    // The script catches each refusal and commits, so an unchanged table proves nothing was written.
     let refuse = |sql: &str, rows: &str| {
         python(&format!(
             "try:\n    c.executemany({sql:?}, {rows})\nexcept Exception as e:\n    result=type(e).__name__\nelse:\n    result='no error'\nc.commit()"
@@ -822,10 +821,8 @@ async fn executemany_writes_all_or_nothing_and_turso_reads_the_rows() {
     let at_cap = python("c.executemany('INSERT INTO mac_check VALUES (?, ?)', [(n, 0) for n in range(100, 356)])\nc.commit()").await;
     assert_eq!(at_cap["ok"], true, "{at_cap}");
     assert_eq!(count().await, json!([263, 140]));
-    // A step failure mid-batch undoes this call's rows but not earlier pending writes.
     let p = python("c.execute('CREATE TABLE uniq (k INTEGER PRIMARY KEY)')\nc.execute('INSERT INTO uniq VALUES (1)')\ntry:\n    c.executemany('INSERT INTO uniq VALUES (?)', [(2,), (3,), (2,)])\nexcept ValueError:\n    pass\nresult=c.execute('SELECT k FROM uniq ORDER BY k').fetchall()\nc.commit()").await;
     assert_eq!(p["result"], json!([[1]]), "{p}");
-    // An ordinary constraint failure keeps row 99; OR ROLLBACK makes the engine drop it.
     let p = python("c.execute('CREATE TABLE keep (n INTEGER PRIMARY KEY)')\nc.commit()\nc.execute('INSERT INTO keep VALUES (99)')\ntry:\n    c.executemany('INSERT INTO keep VALUES (?)', [(1,), (1,)])\nexcept ValueError:\n    pass\nresult=c.execute('SELECT n FROM keep ORDER BY n').fetchall()\nc.commit()").await;
     assert_eq!(p["result"], json!([[99]]), "{p}");
     let p = python("c.execute('INSERT INTO keep VALUES (98)')\ntry:\n    c.executemany('INSERT OR ROLLBACK INTO keep VALUES (?)', [(1,), (1,)])\nexcept ValueError as e:\n    message=str(e)\nresult=[message, c.execute('SELECT n FROM keep ORDER BY n').fetchall()]").await;
