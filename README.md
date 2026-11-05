@@ -358,7 +358,7 @@ deadline, memory, admission, and container limits are mandatory.
 
 See [SECURITY.md](SECURITY.md) for the complete provider/host split and
 [docs/deployment-profile.md](docs/deployment-profile.md) for artifact size, import contract and broker memory evidence. Per-memory limits are not process
-RSS; the owner's Pi deployment limits remain a separate decision. A script gets no generic
+RSS; deployment limits remain the operator's decision. A script gets no generic
 provider dispatch, registry lookup, proposal submission, arbitrary persistence, or privileged imports. Only a separately granted `python.sqlite-eval` script may persist bounded SQL. Child shell scripts are available only through the scoped spawn handle
 and the host's existing authority.
 

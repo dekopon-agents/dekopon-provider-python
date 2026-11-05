@@ -136,13 +136,13 @@ Wasmtime trap into a data envelope. Fuel exhaustion, epoch/Tokio deadline cancel
 allocation failure, and host input/output refusal remain host execution errors.
 
 An empty-linker immediate host cannot instantiate this component. Use the real broker with
-linking of the seven declared interfaces and the Pi-limit evidence in
+linking of the seven declared interfaces and the profiled-limit evidence in
 `docs/deployment-profile.md`: 64 MiB per memory, 24,000,000,000 fuel, 300,000 ms timeout,
 and 12,582,912-byte input/output limits. The 10,000,000
 and 50,000,000 fuel probes intentionally fail safely during VM startup in real-host tests.
 
 Broker defaults retain the memory/table/count and 1 MiB input/output ceilings, provide
-8,000,000,000 fuel and a 30-second timeout; the Pi explicitly configures higher fuel, timeout
+8,000,000,000 fuel and a 30-second timeout; the profiled configuration sets higher fuel, timeout
 and I/O ceilings. Every invocation gets a fresh
 store, async yields occur at most every `min(fuel, 10,000)` units, and Tokio applies the timeout.
 The broker linker provides the seven declared interfaces. The new storage import
@@ -152,7 +152,7 @@ constraints on a single invocation. The guest SDK remains 0.33.0; the built-comp
 shared-namespace test uses broker-host 0.47.0, which owns the grant and namespace binding.
 No grant or binding is included in the provider component. Retain explicit host resource ceilings.
 
-A 64 MiB memory limit is per linear memory, not process RSS. The Pi configures
+A 64 MiB memory limit is per linear memory, not process RSS. The profiled configuration sets
 `maxTotalMemoryBytes: 268435456` as an aggregate guest reservation, not an RSS bound. Compiled code, host allocations, and up to four memories sit outside
 that number. Size broker connection count, aggregate admission, and container memory from the
 measurements in `docs/deployment-profile.md`.
