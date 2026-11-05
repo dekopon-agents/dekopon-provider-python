@@ -15,7 +15,7 @@ fn limits(memory_mib: usize) -> BrokerHostLimits {
 }
 
 #[test]
-#[ignore = "manual broker memory evidence for the Pi profile"]
+#[ignore = "manual broker memory evidence for the broker profile"]
 fn both_toolkit_workloads_pass_at_64_or_128_mib_per_memory() {
     let component = PathBuf::from(
         std::env::var_os("DEKOPON_PROVIDER_COMPONENT").expect("built component path"),

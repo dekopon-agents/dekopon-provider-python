@@ -1,7 +1,7 @@
 # Deployment profile — v0.8.0 combined toolkit and child scripts
 
 The default provider combines a fresh RustPython interpreter, bounded numeric functions and
-scoped child shell scripts. In-memory DataFusion SQL requires the optional `tables` feature. It has not been deployed to the Pi. The
+scoped child shell scripts. In-memory DataFusion SQL requires the optional `tables` feature. The
 broker's configured limits and measured component properties below are different kinds of evidence: an artifact file size is not
 a linear-memory bound, and a per-memory cap is not a container-RSS or aggregate-admission cap.
 
@@ -45,7 +45,7 @@ and the DataFusion fork to `cf3778098ad3ea283ecd8ee2a991be7d9a29750c`.
 
 ## Broker profile and workload evidence
 
-The Pi's `broker.d/host.yaml` sets 24,000,000,000 fuel, 300,000 ms maximum timeout and
+The profiled broker configuration sets 24,000,000,000 fuel, 300,000 ms maximum timeout and
 12,582,912-byte input/output ceilings. It leaves the per-memory limit at the broker's default
 67,108,864 bytes and sets aggregate `maxTotalMemoryBytes` to 268,435,456 bytes. Per-capability
 HTTP constraints still authorize individual requests; pure scripts need no HTTP grant. The
@@ -67,7 +67,7 @@ DEKOPON_PROVIDER_COMPONENT=$PWD/python-provider.wasm cargo test -p dekopon-pytho
 | Numeric batch | PASS | Not needed |
 
 Both workloads passed at 64 MiB; 128 MiB was not run because the fallback condition did not
-occur. These outcomes inform the owner's homelab limit decision; they do not change the Pi's
+occur. These outcomes are evidence for choosing host limits; they do not change any broker
 configuration or cut the toolkit. Host fuel, epoch deadline and memory traps remain host errors,
 not guest JSON failures. The legacy v0.6.3 suites still cover small scripts, HTTP grants, sandbox
 restrictions, fuel and deadline refusal under their own test settings.
@@ -78,6 +78,6 @@ A per-memory 64 MiB cap applies separately to each Wasm linear memory. Compiled 
 Cranelift, host allocations and multiple memories contribute to process RSS independently.
 `maxTotalMemoryBytes` reserves guest memory across admitted stores; it is not an RSS ceiling. The
 historical ~591 MB cold-compiler RSS observation was for the v0.1.0 build, not this component; do
-not use it as a current measurement or derive a container limit from the artifact size. Pi RSS,
+not use it as a current measurement or derive a container limit from the artifact size. Process RSS,
 concurrency and cold-compile latency require deployment-specific measurement before changing
-admission or container memory. No homelab change is made by this PR.
+admission or container memory.
