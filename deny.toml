@@ -23,8 +23,8 @@ ignore = [
   { id = "RUSTSEC-2025-0100", reason = "rust-unic closure of RustPython 0.5.0" },
   { id = "RUSTSEC-2025-0102", reason = "rust-unic closure of RustPython 0.5.0" },
   { id = "RUSTSEC-2026-0542", reason = "unmaintained, not a vulnerability: humantime 2.4.0 reaches the graph only through object_store 0.13.2 (datafusion); removable when object_store drops it" },
-  { id = "RUSTSEC-2026-0543", reason = "unmaintained, not a vulnerability: chrono 0.4.45 reaches the graph through arrow 59.3.0, datafusion (dekopon-agents fork, rev a07792df) and cedar-policy-core 4.13.0; removable when arrow, datafusion and cedar-policy-core drop it" },
-  { id = "RUSTSEC-2026-0555", reason = "unmaintained, not a vulnerability: chrono-tz 0.10.4 reaches the graph only through arrow-array 59.3.0 (arrow); removable when arrow drops it" },
+  { id = "RUSTSEC-2026-0543", reason = "unmaintained, not a vulnerability: chrono 0.4.45 is this provider's own dependency (src/time.rs) and reaches the graph through RustPython 0.5.0, turso, cedar-policy-core 4.13.0 and, with tables, arrow 59.3.0 and datafusion (dekopon-agents fork, rev a07792df); removable when src/time.rs moves off chrono and those drop it" },
+  { id = "RUSTSEC-2026-0555", reason = "unmaintained, not a vulnerability: chrono-tz 0.10.4 reaches the graph only with tables, through arrow-array 59.3.0 and datafusion-functions (dekopon-agents fork, rev a07792df); removable when arrow and datafusion drop it" },
 ]
 
 [licenses]
