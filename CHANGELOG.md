@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-11-20
+
+### Changed
+
+- The deployment profile and security notes describe the profiled broker limits without naming a private deployment.
+
 ## [0.10.1] - 2026-11-04
 
 ### Fixed
