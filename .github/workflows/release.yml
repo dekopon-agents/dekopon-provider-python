@@ -11,7 +11,7 @@ concurrency:
 
 jobs:
   release:
-    uses: dekopon-agents/provider-workflows/.github/workflows/release.yml@2033d4c7ef345bdf640204d53a36d4108ffadeba
+    uses: dekopon-agents/provider-workflows/.github/workflows/release.yml@e4f30a669d9d537f2e52bbf69120bf07805ac49c
     permissions:
       contents: write
       id-token: write
